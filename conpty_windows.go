@@ -17,47 +17,54 @@ var (
 	procReleasePseudoConsole = kernel32.NewProc("ReleasePseudoConsole")
 )
 
+func ProbeConPTYFeature() bool {
+	if procCreatePseudoConsole.Find() != nil {
+		return false
+	}
+	return true
+}
+
 func windowsCoord(sz TermSize) windows.Coord {
 	return windows.Coord{X: int16(sz.Cols), Y: int16(sz.Rows)}
 }
 
 func (p *PtyWin) openConPTY(sz TermSize) error {
-	if procCreatePseudoConsole.Find() != nil {
+	if !ProbeConPTYFeature() {
 		return ErrConPTYNotSupported
 	}
 
 	var err error
-	var SubprocessReadPipe *os.File
-	var SubprocessWritePipe *os.File
+	var subprocessReadPipe *os.File
+	var subprocessWritePipe *os.File
 
-	p.readPipe, SubprocessWritePipe, err = os.Pipe()
+	p.readPipe, subprocessWritePipe, err = os.Pipe()
 	if err != nil {
 		return err
 	}
-	SubprocessReadPipe, p.writePipe, err = os.Pipe()
+	subprocessReadPipe, p.writePipe, err = os.Pipe()
 	if err != nil {
 		p.readPipe.Close()
-		SubprocessWritePipe.Close()
+		subprocessWritePipe.Close()
 		return err
 	}
 
 	err = windows.CreatePseudoConsole(
 		windowsCoord(sz),
-		windows.Handle(SubprocessReadPipe.Fd()),
-		windows.Handle(SubprocessWritePipe.Fd()),
+		windows.Handle(subprocessReadPipe.Fd()),
+		windows.Handle(subprocessWritePipe.Fd()),
 		0, &p.conPty)
 	if err != nil {
 		p.readPipe.Close()
 		p.writePipe.Close()
-		SubprocessWritePipe.Close()
-		SubprocessReadPipe.Close()
+		subprocessWritePipe.Close()
+		subprocessReadPipe.Close()
 		return err
 	}
 
 	// ConPTY duplicates these handles internally and will release them when appropriate.
 	// We can safely close our copies here without worrying about their lifetime.
-	SubprocessWritePipe.Close()
-	SubprocessReadPipe.Close()
+	subprocessWritePipe.Close()
+	subprocessReadPipe.Close()
 
 	return nil
 }
