@@ -247,7 +247,8 @@ type Pty interface {
 	//  - Returns the sub-process exit code (-1 means N/A, e.g., killed by signal).
 	//
 	// For Windows:
-	//  - Wait() may also return -1 when exit code could not be retrieved (permission issues, etc.).
+	//  - Wait() may also return -1 when exit code could not be retrieved or unable to wait
+	//    (permission issues, etc.), in that case, sub-process may still running.
 	Wait() int
 
 	// Thread-safe.

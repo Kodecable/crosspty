@@ -3,7 +3,6 @@
 package crosspty
 
 import (
-	"os"
 	"strings"
 	"syscall"
 	"unicode/utf16"
@@ -94,24 +93,14 @@ func (p *PtyWin) createProcess(cc CommandConfig, sys *syscall.SysProcAttr) error
 }
 
 func (p *PtyWin) processWaiter() {
-	var ps *os.ProcessState
+	defer close(p.exitch)
 
-	osProcess, err := os.FindProcess(int(p.processId))
-	if err != nil {
-		// already dead?
-		goto win32getExitCode
+	event, err := windows.WaitForSingleObject(windows.Handle(p.processHandle), windows.INFINITE)
+	if err != nil || event != windows.WAIT_OBJECT_0 {
+		p.exitCode = -1
+		return
 	}
 
-	ps, err = osProcess.Wait()
-	if err != nil {
-		goto win32getExitCode
-	}
-
-	p.exitCode = ps.ExitCode()
-	close(p.exitch)
-	return
-
-win32getExitCode:
 	var exitCode uint32
 	err = windows.GetExitCodeProcess(windows.Handle(p.processHandle), &exitCode)
 	if err != nil {
@@ -119,7 +108,6 @@ win32getExitCode:
 	} else {
 		p.exitCode = int(exitCode)
 	}
-	close(p.exitch)
 }
 
 func (p *PtyWin) createStartupInfoEx(sys *syscall.SysProcAttr) (*windows.StartupInfoEx, error) {
