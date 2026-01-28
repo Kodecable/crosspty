@@ -14,7 +14,7 @@ import (
 	creackpty "github.com/creack/pty"
 )
 
-type PtyUnix struct {
+type ptyUnix struct {
 	file *os.File
 	cmd  *exec.Cmd
 
@@ -52,7 +52,7 @@ func StartExecCmd(cmd *exec.Cmd, sz TermSize) (Pty, error) {
 
 	closeCfg, _ := normalizeCloseConfig(CloseConfig{})
 
-	p := &PtyUnix{
+	p := &ptyUnix{
 		file:     of,
 		cmd:      cmd,
 		exitch:   make(chan any),
@@ -68,7 +68,7 @@ func StartExecCmd(cmd *exec.Cmd, sz TermSize) (Pty, error) {
 	return p, nil
 }
 
-func (p *PtyUnix) Read(d []byte) (n int, err error) {
+func (p *ptyUnix) Read(d []byte) (n int, err error) {
 	n, err = p.file.Read(d)
 
 	// Linux kernel is returning EIO when reading a dead pty slave
@@ -80,7 +80,7 @@ func (p *PtyUnix) Read(d []byte) (n int, err error) {
 	return
 }
 
-func (p *PtyUnix) SetCloseConfig(cc_ CloseConfig) error {
+func (p *ptyUnix) SetCloseConfig(cc_ CloseConfig) error {
 	cc, err := normalizeCloseConfig(cc_)
 	if err != nil {
 		return err
@@ -100,7 +100,7 @@ func signalToGroup(pid int, sig syscall.Signal) error {
 	return syscall.Kill(pid, sig)
 }
 
-func (p *PtyUnix) Close() (err error) {
+func (p *ptyUnix) Close() (err error) {
 	p.closer.Do(func() {
 		p.file.Close() // trigger SIGHUP
 
@@ -142,20 +142,20 @@ func (p *PtyUnix) Close() (err error) {
 	return
 }
 
-func (p *PtyUnix) Write(d []byte) (n int, err error) {
+func (p *ptyUnix) Write(d []byte) (n int, err error) {
 	return p.file.Write(d)
 }
 
-func (p *PtyUnix) Wait() int {
+func (p *ptyUnix) Wait() int {
 	<-p.exitch
 	return p.exitCode
 }
 
-func (p *PtyUnix) Pid() int {
+func (p *ptyUnix) Pid() int {
 	return p.cmd.Process.Pid
 }
 
-func (p *PtyUnix) SetSize(sz TermSize) error {
+func (p *ptyUnix) SetSize(sz TermSize) error {
 	return creackpty.Setsize(p.file, creackptyWinsize(sz))
 }
 

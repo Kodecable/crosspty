@@ -1,12 +1,13 @@
 package main
 
 import (
-	"crosspty"
 	"fmt"
 	"io"
 	"os"
 	"runtime"
 	"time"
+
+	"github.com/Kodecable/crosspty"
 
 	"golang.org/x/term"
 )

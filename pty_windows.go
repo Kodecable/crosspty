@@ -13,7 +13,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-type PtyWin struct {
+type ptyWin struct {
 	conPty    windows.Handle
 	readPipe  *os.File
 	writePipe *os.File
@@ -62,7 +62,7 @@ func StartWithSysProcAttr(cc CommandConfig, sys *syscall.SysProcAttr) (Pty, erro
 	}
 
 	closeCfg, _ := normalizeCloseConfig(CloseConfig{})
-	p := &PtyWin{
+	p := &ptyWin{
 		exitch:   make(chan any),
 		closeCfg: closeCfg,
 	}
@@ -84,7 +84,7 @@ func StartWithSysProcAttr(cc CommandConfig, sys *syscall.SysProcAttr) (Pty, erro
 	return p, err
 }
 
-func (p *PtyWin) SetCloseConfig(cc_ CloseConfig) error {
+func (p *ptyWin) SetCloseConfig(cc_ CloseConfig) error {
 	cc, err := normalizeCloseConfig(cc_)
 	if err != nil {
 		return err
@@ -93,7 +93,7 @@ func (p *PtyWin) SetCloseConfig(cc_ CloseConfig) error {
 	return nil
 }
 
-func (p *PtyWin) killProcess() error {
+func (p *ptyWin) killProcess() error {
 	p.writePipe.Close() // trigger CTRL_CLOSE_EVENT
 
 	select {
@@ -122,7 +122,7 @@ func (p *PtyWin) killProcess() error {
 	}
 }
 
-func (p *PtyWin) Close() (err error) {
+func (p *ptyWin) Close() (err error) {
 	p.closer.Do(func() {
 		err = p.killProcess()
 		p.attrList.Delete()
@@ -133,12 +133,12 @@ func (p *PtyWin) Close() (err error) {
 	return
 }
 
-func (p *PtyWin) Wait() int {
+func (p *ptyWin) Wait() int {
 	<-p.exitch
 	return p.exitCode
 }
 
-func (p *PtyWin) Read(d []byte) (n int, err error) {
+func (p *ptyWin) Read(d []byte) (n int, err error) {
 	n, err = p.readPipe.Read(d)
 	if errors.Is(err, windows.ERROR_BROKEN_PIPE) {
 		err = io.EOF
@@ -146,16 +146,16 @@ func (p *PtyWin) Read(d []byte) (n int, err error) {
 	return
 }
 
-func (p *PtyWin) Write(d []byte) (n int, err error) {
+func (p *ptyWin) Write(d []byte) (n int, err error) {
 	var n32 uint32
 	err = windows.WriteFile(windows.Handle(p.writePipe.Fd()), d, &n32, nil)
 	return int(n32), err
 }
 
-func (p *PtyWin) Pid() int {
+func (p *ptyWin) Pid() int {
 	return int(p.processId)
 }
 
-func (p *PtyWin) SetSize(sz TermSize) error {
+func (p *ptyWin) SetSize(sz TermSize) error {
 	return windows.ResizePseudoConsole(p.conPty, windowsCoord(sz))
 }

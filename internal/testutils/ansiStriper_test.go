@@ -1,10 +1,11 @@
 package testutils_test
 
 import (
-	"crosspty/internal/testutils"
 	"io"
 	"strings"
 	"testing"
+
+	"github.com/Kodecable/crosspty/internal/testutils"
 )
 
 func TestANSIStripper(t *testing.T) {

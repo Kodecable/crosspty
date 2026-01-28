@@ -28,7 +28,7 @@ func windowsCoord(sz TermSize) windows.Coord {
 	return windows.Coord{X: int16(sz.Cols), Y: int16(sz.Rows)}
 }
 
-func (p *PtyWin) openConPTY(sz TermSize) error {
+func (p *ptyWin) openConPTY(sz TermSize) error {
 	if !ProbeConPTYFeature() {
 		return ErrConPTYNotSupported
 	}
@@ -69,7 +69,7 @@ func (p *PtyWin) openConPTY(sz TermSize) error {
 	return nil
 }
 
-func (p *PtyWin) createProcThreadAttList() (attrList *windows.ProcThreadAttributeListContainer, err error) {
+func (p *ptyWin) createProcThreadAttList() (attrList *windows.ProcThreadAttributeListContainer, err error) {
 	attrList, err = windows.NewProcThreadAttributeList(1)
 	if err != nil {
 		return

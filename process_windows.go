@@ -12,7 +12,7 @@ import (
 )
 
 // sys must not be nil.
-func (p *PtyWin) createProcess(cc CommandConfig, sys *syscall.SysProcAttr) error {
+func (p *ptyWin) createProcess(cc CommandConfig, sys *syscall.SysProcAttr) error {
 	pi := new(windows.ProcessInformation)
 
 	// Need EXTENDED_STARTUPINFO_PRESENT as we're making use of the attribute list field.
@@ -92,7 +92,7 @@ func (p *PtyWin) createProcess(cc CommandConfig, sys *syscall.SysProcAttr) error
 	return nil
 }
 
-func (p *PtyWin) processWaiter() {
+func (p *ptyWin) processWaiter() {
 	defer close(p.exitch)
 
 	event, err := windows.WaitForSingleObject(windows.Handle(p.processHandle), windows.INFINITE)
@@ -110,7 +110,7 @@ func (p *PtyWin) processWaiter() {
 	}
 }
 
-func (p *PtyWin) createStartupInfoEx(sys *syscall.SysProcAttr) (*windows.StartupInfoEx, error) {
+func (p *ptyWin) createStartupInfoEx(sys *syscall.SysProcAttr) (*windows.StartupInfoEx, error) {
 	siEx := new(windows.StartupInfoEx)
 	siEx.Flags = windows.STARTF_USESTDHANDLES
 

@@ -13,11 +13,11 @@ import (
 )
 
 var (
-	ErrUnacceptableTimeout = errors.New("pty: unacceptable timeout or delay")
-	ErrKillTimeout         = errors.New("pty: kill process timeout")
+	ErrUnacceptableTimeout = errors.New("crosspty: unacceptable timeout or delay")
+	ErrKillTimeout         = errors.New("crosspty: kill process timeout")
 
 	// Your Windows version does not support the ConPTY feature
-	ErrConPTYNotSupported = errors.New("pty: ConPTY not supported at this OS")
+	ErrConPTYNotSupported = errors.New("crosspty: ConPTY not supported at this OS")
 )
 
 type TermSize struct {
@@ -38,23 +38,23 @@ type CommandConfig struct {
 	Argv []string
 
 	// default: os.Getwd()
-	// Working dir. Recommend using an absolute full path. Using a relative path
-	// results in Undefined Behavior (UB).
-	// Will also inject the `PWD` Env var unless EnvInject is empty (Unix only).
+	// Working dir. Recommend using an absolute full path. If it is relative,
+	// it is resolved relative to Dir.
+	// Will also generate a `PWD` EnvInject if no such one unless EnvInject is explicit empty.
 	Dir string
 
 	// default: os.Environ()
 	// If you want an empty environment (not default), use []string{}.
 	Env []string
 
-	// default: map[string]string{"TERM": "vt100"}
-	// Will be insert to Env if no set in Env.
-	// Windows also have a `SYSTEMROOT` fallback default.
+	// default: {"TERM": "vt100"}
+	// Will be insert to Env if not set.
+	// Windows also have a `SYSTEMROOT` fallback by default.
 	EnvFallback map[string]string
 
 	// default: PWD (Unix) or Empty (Windows)
-	// Will overwrite Env.
-	// Use "A" to delete Env key "A".
+	// Overwrite Env.
+	// Use {"A": ""} to delete key "A".
 	EnvInject map[string]string
 
 	// default: 24x80
@@ -160,11 +160,13 @@ func NormalizeCommandConfig(cc_ CommandConfig) (cc CommandConfig, err error) {
 		}
 	}
 
-	if cc.EnvInject == nil {
-		cc.EnvInject = map[string]string{}
-	}
-	if _, ok := cc.EnvInject["PWD"]; !ok {
-		cc.EnvInject["PWD"] = cc.Dir
+	if !(cc.EnvInject != nil && len(cc.EnvInject) == 0) {
+		if cc.EnvInject == nil {
+			cc.EnvInject = map[string]string{}
+		}
+		if _, ok := cc.EnvInject["PWD"]; !ok {
+			cc.EnvInject["PWD"] = cc.Dir
+		}
 	}
 
 	cc.Env = ApplyEnvFallbackAndInject(cc.Env, cc.EnvFallback, cc.EnvInject)
@@ -259,16 +261,16 @@ type Pty interface {
 	SetSize(sz TermSize) error
 }
 
-func Start(ca CommandConfig) (Pty, error) {
-	return start(ca)
+func Start(cc CommandConfig) (Pty, error) {
+	return start(cc)
 
 	// Experimental TODO: runtime.AddCleanup?
 }
 
 // A simple helper that runs the command once and collects all output.
 // Note: Close errors are ignored.
-func Oneshot(ca CommandConfig) (buf []byte, err error) {
-	ptmx, err := Start(ca)
+func Oneshot(cc CommandConfig) (buf []byte, err error) {
+	ptmx, err := Start(cc)
 	if err != nil {
 		return nil, err
 	}

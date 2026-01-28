@@ -1,4 +1,4 @@
-module crosspty
+module github.com/Kodecable/crosspty
 
 go 1.23.0
 

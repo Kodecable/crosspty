@@ -3,8 +3,6 @@ package crosspty_test
 import (
 	"bufio"
 	"bytes"
-	"crosspty"
-	"crosspty/internal/testutils"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +13,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Kodecable/crosspty"
+	"github.com/Kodecable/crosspty/internal/testutils"
 
 	"golang.org/x/term"
 )
