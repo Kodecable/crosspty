@@ -17,6 +17,11 @@ func (p *ptyWin) createProcess(cc CommandConfig, sys *syscall.SysProcAttr) error
 
 	// Need EXTENDED_STARTUPINFO_PRESENT as we're making use of the attribute list field.
 	flags := sys.CreationFlags | uint32(windows.CREATE_UNICODE_ENVIRONMENT) | windows.EXTENDED_STARTUPINFO_PRESENT
+	paused := false
+	if p.killMode == KillModeKillGroupOnClose || p.killMode == KillModeKillGroupOnSubProcessExit {
+		flags = flags | windows.CREATE_SUSPENDED
+		paused = true
+	}
 
 	siEx, err := p.createStartupInfoEx(sys)
 	if err != nil {
@@ -81,14 +86,29 @@ func (p *ptyWin) createProcess(cc CommandConfig, sys *syscall.SysProcAttr) error
 	p.processId = pi.ProcessId
 	p.processHandle = pi.Process
 
-	go p.processWaiter()
-
 	err = makeConPTYAutoCloseReadPipe(p.conPty)
 	if err != nil {
 		windows.TerminateProcess(p.processHandle, 0)
 		return err
 	}
 
+	if p.killMode != KillModeKillSubProcess {
+		err = windows.AssignProcessToJobObject(p.jobHandle, p.processHandle)
+		if err != nil {
+			windows.TerminateProcess(p.processHandle, 0)
+			return err
+		}
+	}
+
+	if paused {
+		_, err = windows.ResumeThread(pi.Thread)
+		if err != nil {
+			windows.TerminateProcess(p.processHandle, 0)
+			return err
+		}
+	}
+
+	go p.processWaiter()
 	return nil
 }
 
@@ -107,6 +127,9 @@ func (p *ptyWin) processWaiter() {
 		p.exitCode = -1
 	} else {
 		p.exitCode = int(exitCode)
+		if p.killMode == KillModeKillGroupOnSubProcessExit {
+			windows.TerminateJobObject(p.jobHandle, 0)
+		}
 	}
 }
 

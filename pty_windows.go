@@ -27,6 +27,9 @@ type ptyWin struct {
 
 	processId     uint32
 	processHandle windows.Handle
+
+	killMode  KillMode
+	jobHandle windows.Handle
 }
 
 func start(cc CommandConfig) (Pty, error) {
@@ -65,10 +68,19 @@ func StartWithSysProcAttr(cc CommandConfig, sys *syscall.SysProcAttr) (Pty, erro
 	p := &ptyWin{
 		exitch:   make(chan any),
 		closeCfg: closeCfg,
+		killMode: cc.KillMode,
+	}
+
+	if p.killMode != KillModeKillSubProcess {
+		p.jobHandle, err = windows.CreateJobObject(nil, nil)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	err = p.openConPTY(cc.Size)
 	if err != nil {
+		windows.CloseHandle(p.jobHandle)
 		return nil, err
 	}
 
@@ -78,6 +90,7 @@ func StartWithSysProcAttr(cc CommandConfig, sys *syscall.SysProcAttr) (Pty, erro
 		p.readPipe.Close()
 		p.writePipe.Close()
 		p.attrList.Delete()
+		windows.CloseHandle(p.jobHandle)
 		return nil, err
 	}
 
@@ -89,6 +102,7 @@ func (p *ptyWin) SetCloseConfig(cc_ CloseConfig) error {
 	if err != nil {
 		return err
 	}
+
 	p.closeCfg = cc
 	return nil
 }
@@ -103,13 +117,20 @@ func (p *ptyWin) killProcess() error {
 		return nil
 	}
 
-	// doc: https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess
-	err := windows.TerminateProcess(p.processHandle, 0)
-	if err != nil {
-		// > After a process has terminated, call to TerminateProcess with
-		// > open handles to the process fails with ERROR_ACCESS_DENIED (5)
-		// > error code.
-		if !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+	if p.killMode == KillModeKillSubProcess {
+		// doc: https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess
+		err := windows.TerminateProcess(p.processHandle, 0)
+		if err != nil {
+			// > After a process has terminated, call to TerminateProcess with
+			// > open handles to the process fails with ERROR_ACCESS_DENIED (5)
+			// > error code.
+			if !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+				return err
+			}
+		}
+	} else {
+		err := windows.TerminateJobObject(p.jobHandle, 0)
+		if err != nil {
 			return err
 		}
 	}
@@ -129,6 +150,7 @@ func (p *ptyWin) Close() (err error) {
 		windows.CloseHandle(p.processHandle)
 		windows.ClosePseudoConsole(p.conPty)
 		p.readPipe.Close()
+		windows.CloseHandle(p.jobHandle)
 	})
 	return
 }

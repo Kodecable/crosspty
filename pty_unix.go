@@ -18,6 +18,9 @@ type ptyUnix struct {
 	file *os.File
 	cmd  *exec.Cmd
 
+	pidFD    int
+	killMode KillMode
+
 	exitCode int
 	exitch   chan any
 	closer   sync.Once
@@ -38,30 +41,36 @@ func start(cc CommandConfig) (Pty, error) {
 	cmd.Dir = cc.Dir
 	cmd.Env = cc.Env
 
-	return StartExecCmd(cmd, cc.Size)
+	return StartExecCmd(cmd, cc.Size, cc.KillMode)
 }
 
 // Unix only.
 // You do not need to, and MUST NOT, set setpgid.
+// On Linux, this function will overwrite cmd.SysProcAttr.PidFD.
 // Use this function only if you know exactly what you are doing.
-func StartExecCmd(cmd *exec.Cmd, sz TermSize) (Pty, error) {
+func StartExecCmd(cmd *exec.Cmd, sz TermSize, killMode KillMode) (Pty, error) {
+	closeCfg, _ := normalizeCloseConfig(CloseConfig{})
+	p := &ptyUnix{
+		cmd:      cmd,
+		exitch:   make(chan any),
+		closeCfg: closeCfg,
+		killMode: killMode,
+	}
+	p.setSysProcAttr(cmd)
+
 	of, err := creackpty.StartWithSize(cmd, creackptyWinsize(sz))
 	if err != nil {
 		return nil, err
 	}
+	p.file = of
 
-	closeCfg, _ := normalizeCloseConfig(CloseConfig{})
-
-	p := &ptyUnix{
-		file:     of,
-		cmd:      cmd,
-		exitch:   make(chan any),
-		closeCfg: closeCfg,
-	}
 	go func() {
 		// we collect exit code instead the error of Wait() here
 		cmd.Wait()
 		p.exitCode = cmd.ProcessState.ExitCode()
+		if p.killMode == KillModeKillGroupOnSubProcessExit {
+			p.killPrcoess(true)
+		}
 		close(p.exitch)
 	}()
 
@@ -85,33 +94,40 @@ func (p *ptyUnix) SetCloseConfig(cc_ CloseConfig) error {
 	if err != nil {
 		return err
 	}
+
 	p.closeCfg = cc
 	return nil
 }
 
-func signalToGroup(pid int, sig syscall.Signal) error {
-	if pid > 1 {
-		// We dont want to kill everyone.
-		// However, this may still happen in some Docker or namespace setups.
-		// This may be overly conservative.
-		// TODO: make a choice
-		pid = -pid
+func (p *ptyUnix) killPrcoessUnix(group bool) error {
+	pid := p.cmd.Process.Pid
+	if group {
+		if pid > 1 {
+			// We dont want to kill everyone.
+			// However, this may still happen in some Docker or namespace setups.
+			// This may be overly conservative.
+			// TODO: make a choice
+			pid = -pid
+		}
 	}
-	return syscall.Kill(pid, sig)
+	return syscall.Kill(pid, p.closeCfg.ForceKillSignal)
 }
 
 func (p *ptyUnix) Close() (err error) {
 	p.closer.Do(func() {
+		defer closePidFD(p.pidFD)
 		p.file.Close() // trigger SIGHUP
 
 		select {
 		case <-time.After(p.closeCfg.ForceKillDelay):
 			break
 		case <-p.exitch:
-			return
+			if p.killMode != KillModeKillGroupOnClose {
+				return
+			}
 		}
 
-		err = signalToGroup(p.cmd.Process.Pid, syscall.SIGKILL)
+		err = p.killPrcoess(p.killMode != KillModeKillSubProcess)
 		if err != nil {
 			if errors.Is(err, syscall.ESRCH) {
 				// It's dead, ok

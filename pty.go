@@ -27,6 +27,35 @@ type TermSize struct {
 	Y    uint16 // Height in pixels (optional, unix only).
 }
 
+type KillMode uint8
+
+const (
+	// Kill the process group when the direct subprocess exits.
+	// On Windows, this starts the subprocess suspended, assigns it to a Job Object
+	// with no extra limits, and then resumes it.
+	// Some software may be sensitive to suspend/resume or Job Object membership.
+	// Cleanup may still be delayed until Close() if Wait() returns -1.
+	// On Linux < 6.9 or on other Unix systems, there is still a very small PID reuse race window.
+	KillModeKillGroupOnSubProcessExit KillMode = iota
+
+	// Defer process-group cleanup to Close().
+	// On Windows, this starts the subprocess suspended, assigns it to a Job Object
+	// with no extra limits, and then resumes it.
+	// Some software may be sensitive to suspend/resume or Job Object membership.
+	// On Linux < 6.9 or on other Unix systems, Close() should be called soon after the child exits
+	// to reduce the chance of a PID reuse race.
+	KillModeKillGroupOnClose
+
+	// Only target the direct subprocess for forced termination and ignore the rest of
+	// the process group.
+	// On Windows, this mode does not add a Job Object or an extra suspend/resume step.
+	// ConPTY may still kill the process group:
+	//   > If the original child was a shell-type application that creates other processes, any related attached processes in the tree will also be terminated.
+	//   https://learn.microsoft.com/en-us/windows/console/creating-a-pseudoconsole-session
+	// On Linux < 5.3 or on other Unix systems, there is still a very small PID reuse race window.
+	KillModeKillSubProcess
+)
+
 type CommandConfig struct {
 	// e.g. []string{"/usr/bin/bash", "-i"}
 	//  - Recommend using an absolute full path as argv0.
@@ -59,6 +88,9 @@ type CommandConfig struct {
 
 	// default: 24x80
 	Size TermSize
+
+	// default: KillModeKillGroupOnSubProcessExit
+	KillMode KillMode
 }
 
 type CloseConfig struct {
@@ -238,7 +270,7 @@ type Pty interface {
 	// Thread-safe. Can be called multiple times.
 	Close() error
 
-	// Wait for the sub-process to exit.
+	// Wait for the child process to exit and return its exit code.
 	//  - If you do not read, the process may not exit (buffer full).
 	//  - A successful Close() will stop the wait.
 	//  - Wait() will exit immediately if a previous Wait() has already exited.
@@ -249,8 +281,11 @@ type Pty interface {
 	//  - Returns the sub-process exit code (-1 means N/A, e.g., killed by signal).
 	//
 	// For Windows:
-	//  - Wait() may also return -1 when exit code could not be retrieved or unable to wait
-	//    (permission issues, etc.), in that case, sub-process may still running.
+	//  - Wait() may also return -1 when the exit code could not be retrieved or the
+	//    process could not be waited on (permission issues, etc.); in that case, the
+	//    sub-process may still be running.
+	//  - If the child is force-killed, the exit code may be determined by the killer.
+	//    This library uses 0 in that case.
 	Wait() int
 
 	// Thread-safe.
