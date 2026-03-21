@@ -10,9 +10,15 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// PidFD returns the Linux pidfd tracked by this package.
-// The returned fd is owned by the Pty instance and remains valid until Close().
-// It returns -1 when pidfd is not available.
+type PtyLinux interface {
+	Pty
+
+	// PidFD returns the Linux pidfd tracked by this package.
+	// The returned fd is owned by the Pty instance and remains valid until Close().
+	// It returns -1 when pidfd is not available.
+	PidFD() int
+}
+
 func (p *ptyUnix) PidFD() int {
 	return p.pidFD
 }
@@ -25,16 +31,16 @@ func (p *ptyUnix) setSysProcAttr(cmd *exec.Cmd) {
 	cmd.SysProcAttr.PidFD = &p.pidFD
 }
 
-func (p *ptyUnix) killPrcoess(group bool) (err error) {
+func (p *ptyUnix) killProcess(group bool) (err error) {
 	const PIDFD_SIGNAL_PROCESS_GROUP = 4 // (since linux 6.9)
 
 	if p.pidFD == -1 {
-		return p.killPrcoessUnix(group)
+		return p.killProcessUnix(group)
 	} else {
 		if group {
 			err = unix.PidfdSendSignal(p.pidFD, p.closeCfg.ForceKillSignal, nil, PIDFD_SIGNAL_PROCESS_GROUP)
 			if errors.Is(err, syscall.EINVAL) {
-				return p.killPrcoessUnix(group)
+				return p.killProcessUnix(group)
 			}
 			return err
 		} else {

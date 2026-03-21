@@ -69,7 +69,7 @@ func StartExecCmd(cmd *exec.Cmd, sz TermSize, killMode KillMode) (Pty, error) {
 		cmd.Wait()
 		p.exitCode = cmd.ProcessState.ExitCode()
 		if p.killMode == KillModeKillGroupOnSubProcessExit {
-			p.killPrcoess(true)
+			p.killProcess(true)
 		}
 		close(p.exitch)
 	}()
@@ -99,7 +99,7 @@ func (p *ptyUnix) SetCloseConfig(cc_ CloseConfig) error {
 	return nil
 }
 
-func (p *ptyUnix) killPrcoessUnix(group bool) error {
+func (p *ptyUnix) killProcessUnix(group bool) error {
 	pid := p.cmd.Process.Pid
 	if group {
 		if pid > 1 {
@@ -127,7 +127,7 @@ func (p *ptyUnix) Close() (err error) {
 			}
 		}
 
-		err = p.killPrcoess(p.killMode != KillModeKillSubProcess)
+		err = p.killProcess(p.killMode != KillModeKillSubProcess)
 		if err != nil {
 			if errors.Is(err, syscall.ESRCH) {
 				// It's dead, ok
