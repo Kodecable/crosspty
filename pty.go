@@ -68,7 +68,7 @@ type CommandConfig struct {
 
 	// default: os.Getwd()
 	// Working dir. Recommend using an absolute full path. If it is relative,
-	// it is resolved relative to Dir.
+	// it is resolved relative to os.Getwd().
 	// Will also generate a `PWD` EnvInject if no such one unless EnvInject is explicit empty.
 	Dir string
 
@@ -174,7 +174,7 @@ func NormalizeCommandConfig(cc_ CommandConfig) (cc CommandConfig, err error) {
 	}
 
 	if !filepath.IsAbs(cc.Argv[0]) {
-		cc.Argv[0] = filepath.Join(wd, cc.Argv[0])
+		cc.Argv[0] = filepath.Join(cc.Dir, cc.Argv[0])
 	}
 
 	if cc.Env == nil {
