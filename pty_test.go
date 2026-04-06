@@ -80,7 +80,7 @@ func TestVersion(t *testing.T) {
 
 func TestHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
-		for i := range 50 {
+		for i := range 500 {
 			fmt.Printf("test line %d\n", i+1)
 		}
 		os.Exit(0)
@@ -334,10 +334,10 @@ func TestApplyEnvFallbackAndInject(t *testing.T) {
 			want:     []string{"B=2"},
 		},
 		{
-			env:      []string{"WEIRD_KEY", "EMPTY="},
+			env:      []string{"WEIRD_KEY", "WEIRD_KEY2", "=A=WEIRD_KEY3", "EMPTY=", "EMPTY2="},
 			fallback: nil,
 			inject:   map[string]string{"WEIRD_KEY": "fixed", "EMPTY": "filled"},
-			want:     []string{"WEIRD_KEY=fixed", "EMPTY=filled"},
+			want:     []string{"WEIRD_KEY=fixed", "WEIRD_KEY2", "=A=WEIRD_KEY3", "EMPTY=filled", "EMPTY2="},
 		},
 		{
 			env:      []string{"A=original"},
