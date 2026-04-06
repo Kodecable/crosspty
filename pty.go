@@ -56,6 +56,24 @@ const (
 	KillModeKillSubProcess
 )
 
+type CloseConfig struct {
+	// Total timeout for Close().
+	// Must be at least 1 second longer than KillDelay.
+	// default: 10s
+	CloseTimeout time.Duration
+
+	// Delay before attempting to force kill the process.
+	// default: 5s
+	KillDelay time.Duration
+
+	// Unix only.
+	// default: SIGKILL
+	KillSignal syscall.Signal
+
+	// default: KillModeKillGroupOnSubProcessExit
+	KillMode KillMode
+}
+
 type CommandConfig struct {
 	// e.g. []string{"/usr/bin/bash", "-i"}
 	//  - Recommend using an absolute full path as argv0.
@@ -89,23 +107,7 @@ type CommandConfig struct {
 	// default: 24x80
 	Size TermSize
 
-	// default: KillModeKillGroupOnSubProcessExit
-	KillMode KillMode
-}
-
-type CloseConfig struct {
-	// Total timeout for Close().
-	// Must be at least 1 second longer than ForceKillDelay.
-	// default: 10s
-	CloseTimeout time.Duration
-
-	// Delay before attempting to force kill the process.
-	// default: 5s
-	ForceKillDelay time.Duration
-
-	// Unix only.
-	// default: SIGKILL
-	ForceKillSignal syscall.Signal
+	CloseConfig CloseConfig
 }
 
 func ApplyEnvFallbackAndInject(Env []string, Fallback, Inject map[string]string) (New []string) {
@@ -209,23 +211,25 @@ func NormalizeCommandConfig(cc_ CommandConfig) (cc CommandConfig, err error) {
 			Cols: 80,
 		}
 	}
-	return cc, nil
+
+	cc.CloseConfig, err = normalizeCloseConfig(cc.CloseConfig)
+	return cc, err
 }
 
 func normalizeCloseConfig(cc_ CloseConfig) (CloseConfig, error) {
 	cc := cc_
 
-	if cc.CloseTimeout == 0 && cc.ForceKillDelay == 0 {
+	if cc.CloseTimeout == 0 && cc.KillDelay == 0 {
 		cc.CloseTimeout = 10 * time.Second
-		cc.ForceKillDelay = 5 * time.Second
+		cc.KillDelay = 5 * time.Second
 	}
 
-	if cc.CloseTimeout-cc.ForceKillDelay < 1*time.Second {
+	if cc.CloseTimeout-cc.KillDelay < 1*time.Second {
 		return cc, ErrUnacceptableTimeout
 	}
 
-	if cc.ForceKillSignal == 0 {
-		cc.ForceKillSignal = syscall.SIGKILL
+	if cc.KillSignal == 0 {
+		cc.KillSignal = syscall.SIGKILL
 	}
 
 	return cc, nil
@@ -258,11 +262,6 @@ type Pty interface {
 	// You MUST NOT read after Close().
 	// Thread-safe.
 	Read(d []byte) (n int, err error)
-
-	// Not thread-safe. Can be called multiple times.
-	// Safe to call concurrently with other funcs except Close().
-	// You should call this before Close().
-	SetCloseConfig(CloseConfig) error
 
 	// Kill sub-process and wait for it to die (with timeout), freeing resources.
 	// Will attempt graceful termination first (SIGHUP, CTRL_CLOSE_EVENT).

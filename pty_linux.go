@@ -38,13 +38,13 @@ func (p *ptyUnix) killProcess(group bool) (err error) {
 		return p.killProcessUnix(group)
 	} else {
 		if group {
-			err = unix.PidfdSendSignal(p.pidFD, p.closeCfg.ForceKillSignal, nil, PIDFD_SIGNAL_PROCESS_GROUP)
+			err = unix.PidfdSendSignal(p.pidFD, p.closeCfg.KillSignal, nil, PIDFD_SIGNAL_PROCESS_GROUP)
 			if errors.Is(err, syscall.EINVAL) {
 				return p.killProcessUnix(group)
 			}
 			return err
 		} else {
-			return unix.PidfdSendSignal(p.pidFD, p.closeCfg.ForceKillSignal, nil, 0)
+			return unix.PidfdSendSignal(p.pidFD, p.closeCfg.KillSignal, nil, 0)
 		}
 	}
 }

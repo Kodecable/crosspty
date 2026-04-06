@@ -18,7 +18,7 @@ func (p *ptyWin) createProcess(cc CommandConfig, sys *syscall.SysProcAttr) error
 	// Need EXTENDED_STARTUPINFO_PRESENT as we're making use of the attribute list field.
 	flags := sys.CreationFlags | uint32(windows.CREATE_UNICODE_ENVIRONMENT) | windows.EXTENDED_STARTUPINFO_PRESENT
 	paused := false
-	if p.killMode == KillModeKillGroupOnClose || p.killMode == KillModeKillGroupOnSubProcessExit {
+	if p.closeCfg.KillMode == KillModeKillGroupOnClose || p.closeCfg.KillMode == KillModeKillGroupOnSubProcessExit {
 		flags = flags | windows.CREATE_SUSPENDED
 		paused = true
 	}
@@ -92,7 +92,7 @@ func (p *ptyWin) createProcess(cc CommandConfig, sys *syscall.SysProcAttr) error
 		return err
 	}
 
-	if p.killMode != KillModeKillSubProcess {
+	if p.closeCfg.KillMode != KillModeKillSubProcess {
 		err = windows.AssignProcessToJobObject(p.jobHandle, p.processHandle)
 		if err != nil {
 			windows.TerminateProcess(p.processHandle, 0)
@@ -127,7 +127,7 @@ func (p *ptyWin) processWaiter() {
 		p.exitCode = -1
 	} else {
 		p.exitCode = int(exitCode)
-		if p.killMode == KillModeKillGroupOnSubProcessExit {
+		if p.closeCfg.KillMode == KillModeKillGroupOnSubProcessExit {
 			windows.TerminateJobObject(p.jobHandle, 0)
 		}
 	}

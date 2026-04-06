@@ -18,8 +18,7 @@ type ptyUnix struct {
 	file *os.File
 	cmd  *exec.Cmd
 
-	pidFD    int
-	killMode KillMode
+	pidFD int
 
 	exitCode int
 	exitch   chan any
@@ -41,20 +40,23 @@ func start(cc CommandConfig) (Pty, error) {
 	cmd.Dir = cc.Dir
 	cmd.Env = cc.Env
 
-	return StartExecCmd(cmd, cc.Size, cc.KillMode)
+	return StartExecCmd(cmd, cc.Size, cc.CloseConfig)
 }
 
 // Unix only.
 // You do not need to, and MUST NOT, set setpgid.
 // On Linux, this function will overwrite cmd.SysProcAttr.PidFD.
 // Use this function only if you know exactly what you are doing.
-func StartExecCmd(cmd *exec.Cmd, sz TermSize, killMode KillMode) (Pty, error) {
-	closeCfg, _ := normalizeCloseConfig(CloseConfig{})
+func StartExecCmd(cmd *exec.Cmd, sz TermSize, closeConfig CloseConfig) (Pty, error) {
+	closeCfg, err := normalizeCloseConfig(closeConfig)
+	if err != nil {
+		return nil, err
+	}
+
 	p := &ptyUnix{
 		cmd:      cmd,
 		exitch:   make(chan any),
 		closeCfg: closeCfg,
-		killMode: killMode,
 	}
 	p.setSysProcAttr(cmd)
 
@@ -68,7 +70,7 @@ func StartExecCmd(cmd *exec.Cmd, sz TermSize, killMode KillMode) (Pty, error) {
 		// we collect exit code instead the error of Wait() here
 		cmd.Wait()
 		p.exitCode = cmd.ProcessState.ExitCode()
-		if p.killMode == KillModeKillGroupOnSubProcessExit {
+		if p.closeCfg.KillMode == KillModeKillGroupOnSubProcessExit {
 			p.killProcess(true)
 		}
 		close(p.exitch)
@@ -89,16 +91,6 @@ func (p *ptyUnix) Read(d []byte) (n int, err error) {
 	return
 }
 
-func (p *ptyUnix) SetCloseConfig(cc_ CloseConfig) error {
-	cc, err := normalizeCloseConfig(cc_)
-	if err != nil {
-		return err
-	}
-
-	p.closeCfg = cc
-	return nil
-}
-
 func (p *ptyUnix) killProcessUnix(group bool) error {
 	pid := p.cmd.Process.Pid
 	if group {
@@ -110,7 +102,7 @@ func (p *ptyUnix) killProcessUnix(group bool) error {
 			pid = -pid
 		}
 	}
-	return syscall.Kill(pid, p.closeCfg.ForceKillSignal)
+	return syscall.Kill(pid, p.closeCfg.KillSignal)
 }
 
 func (p *ptyUnix) Close() (err error) {
@@ -119,15 +111,15 @@ func (p *ptyUnix) Close() (err error) {
 		p.file.Close() // trigger SIGHUP
 
 		select {
-		case <-time.After(p.closeCfg.ForceKillDelay):
+		case <-time.After(p.closeCfg.KillDelay):
 			break
 		case <-p.exitch:
-			if p.killMode != KillModeKillGroupOnClose {
+			if p.closeCfg.KillMode != KillModeKillGroupOnClose {
 				return
 			}
 		}
 
-		err = p.killProcess(p.killMode != KillModeKillSubProcess)
+		err = p.killProcess(p.closeCfg.KillMode != KillModeKillSubProcess)
 		if err != nil {
 			if errors.Is(err, syscall.ESRCH) {
 				// It's dead, ok
@@ -142,7 +134,7 @@ func (p *ptyUnix) Close() (err error) {
 		}
 
 		select {
-		case <-time.After(p.closeCfg.CloseTimeout - p.closeCfg.ForceKillDelay):
+		case <-time.After(p.closeCfg.CloseTimeout - p.closeCfg.KillDelay):
 			if errors.Is(err, syscall.EPERM) {
 				// Damm, it's true EPERM
 				// Maybe sudo or SELinux? Whatever, can't handle, tell user

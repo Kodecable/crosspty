@@ -284,17 +284,13 @@ func TestPtySIGKILL(t *testing.T) {
 	p, err := crosspty.Start(crosspty.CommandConfig{
 		Argv: []string{"sh", "-c", "trap '' HUP INT TERM; echo ready; while :; do sleep 0.1; done"},
 		Env:  []string{},
+		CloseConfig: crosspty.CloseConfig{
+			CloseTimeout: 2000 * time.Millisecond,
+			KillDelay:    200 * time.Millisecond,
+		},
 	})
 	if err != nil {
 		t.Fatalf("unable to start pty: %v", err)
-	}
-
-	err = p.SetCloseConfig(crosspty.CloseConfig{
-		CloseTimeout:   2000 * time.Millisecond,
-		ForceKillDelay: 200 * time.Millisecond,
-	})
-	if err != nil {
-		t.Fatalf("unable to set pty close config: %v", err)
 	}
 
 	line, err := bufio.NewReader(testutils.NewANSIStripper(p)).ReadString('\n')

@@ -28,7 +28,6 @@ type ptyWin struct {
 	processId     uint32
 	processHandle windows.Handle
 
-	killMode  KillMode
 	jobHandle windows.Handle
 }
 
@@ -64,14 +63,12 @@ func StartWithSysProcAttr(cc CommandConfig, sys *syscall.SysProcAttr) (Pty, erro
 		return nil, err
 	}
 
-	closeCfg, _ := normalizeCloseConfig(CloseConfig{})
 	p := &ptyWin{
 		exitch:   make(chan any),
-		closeCfg: closeCfg,
-		killMode: cc.KillMode,
+		closeCfg: cc.CloseConfig,
 	}
 
-	if p.killMode != KillModeKillSubProcess {
+	if p.closeCfg.KillMode != KillModeKillSubProcess {
 		p.jobHandle, err = windows.CreateJobObject(nil, nil)
 		if err != nil {
 			return nil, err
@@ -97,27 +94,17 @@ func StartWithSysProcAttr(cc CommandConfig, sys *syscall.SysProcAttr) (Pty, erro
 	return p, err
 }
 
-func (p *ptyWin) SetCloseConfig(cc_ CloseConfig) error {
-	cc, err := normalizeCloseConfig(cc_)
-	if err != nil {
-		return err
-	}
-
-	p.closeCfg = cc
-	return nil
-}
-
 func (p *ptyWin) killProcess() error {
 	p.writePipe.Close() // trigger CTRL_CLOSE_EVENT
 
 	select {
-	case <-time.After(p.closeCfg.ForceKillDelay):
+	case <-time.After(p.closeCfg.KillDelay):
 		break
 	case <-p.exitch:
 		return nil
 	}
 
-	if p.killMode == KillModeKillSubProcess {
+	if p.closeCfg.KillMode == KillModeKillSubProcess {
 		// doc: https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess
 		err := windows.TerminateProcess(p.processHandle, 0)
 		if err != nil {
@@ -136,7 +123,7 @@ func (p *ptyWin) killProcess() error {
 	}
 
 	select {
-	case <-time.After(p.closeCfg.CloseTimeout - p.closeCfg.ForceKillDelay):
+	case <-time.After(p.closeCfg.CloseTimeout - p.closeCfg.KillDelay):
 		return ErrKillTimeout
 	case <-p.exitch:
 		return nil
