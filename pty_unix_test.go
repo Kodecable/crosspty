@@ -9,7 +9,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -61,8 +63,7 @@ func readHelperPid(t *testing.T, p crosspty.Pty) int {
 func waitForProcessState(pid int, wantAlive bool, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for {
-		err := syscall.Kill(pid, 0)
-		alive := err == nil || err == syscall.EPERM
+		alive := checkProcessAlive(pid)
 		if alive == wantAlive {
 			return true
 		}
@@ -71,6 +72,28 @@ func waitForProcessState(pid int, wantAlive bool, timeout time.Duration) bool {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+func checkProcessAlive(pid int) bool {
+	if runtime.GOOS == "linux" {
+		statusPath := fmt.Sprintf("/proc/%d/status", pid)
+		if data, err := os.ReadFile(statusPath); err == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				if !strings.HasPrefix(line, "State:") {
+					continue
+				}
+
+				fields := strings.Fields(line)
+				if len(fields) >= 2 && fields[1] == "Z" {
+					return false
+				}
+				return true
+			}
+		}
+	}
+
+	err := syscall.Kill(pid, 0)
+	return err == nil || err == syscall.EPERM
 }
 
 func sortedEnvUnix(env []string) []string {

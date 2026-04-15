@@ -38,6 +38,7 @@ func TestKillModeKillGroupOnClose_PidfdOnly(t *testing.T) {
 		_ = p.Close()
 		t.Skip("pidfd unavailable")
 	}
+	t.Logf("pidfd: %v", linuxPty.PidFD())
 
 	childPID := readHelperPid(t, p)
 

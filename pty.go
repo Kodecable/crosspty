@@ -30,6 +30,11 @@ type TermSize struct {
 type KillMode uint8
 
 const (
+	// For group-kill modes on Unix: if the direct PTY subprocess dead before one of
+	// its descendants, CrossPTY can still kill that process group, but zombie
+	// descendants still need to be reaped by init or another subreaper. Container
+	// environments such as Docker should ensure that a proper init/subreaper is present.
+
 	// Kill the process group when the direct subprocess exits.
 	// On Windows, this starts the subprocess suspended, assigns it to a Job Object
 	// with no extra limits, and then resumes it.
