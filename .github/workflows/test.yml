@@ -32,7 +32,12 @@ jobs:
           go-version-file: go.mod
 
       - name: Run tests
-        run: go test -count=1 -v -timeout=10m ./...
+        run: go test -coverprofile=coverage.txt -count=1 -v -timeout=10m ./...
+
+      - name: Upload results to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   go-test-race:
     name: ubuntu-24.04 race
@@ -49,4 +54,9 @@ jobs:
           go-version-file: go.mod
 
       - name: Run race tests
-        run: go test -race -count=1 -timeout=10m ./...
+        run: go test -coverprofile=coverage.txt -race -count=1 -timeout=10m ./...
+
+      - name: Upload results to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
