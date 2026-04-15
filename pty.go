@@ -92,6 +92,7 @@ type CommandConfig struct {
 
 	// default: os.Environ()
 	// If you want an empty environment (not default), use []string{}.
+	// See ApplyEnvFallbackAndInject for platform-specific merge semantics.
 	Env []string
 
 	// default: {"TERM": "vt100"}
@@ -99,7 +100,7 @@ type CommandConfig struct {
 	// Windows also have a `SYSTEMROOT` fallback by default.
 	EnvFallback map[string]string
 
-	// default: PWD (Unix) or Empty (Windows)
+	// default: PWD
 	// Overwrite Env.
 	// Use {"A": ""} to delete key "A".
 	EnvInject map[string]string
@@ -110,17 +111,46 @@ type CommandConfig struct {
 	CloseConfig CloseConfig
 }
 
+// On Windows, keys in Env, Fallback, and Inject are compared
+// case-insensitively. If Fallback or Inject contains multiple keys that differ
+// only by case, one of them is chosen.
 func ApplyEnvFallbackAndInject(Env []string, Fallback, Inject map[string]string) (New []string) {
 	New = []string{}
 	// Track keys present in the original Env to determine whether fallback values are needed.
 	envKeys := map[string]any{}
 
+	injectKeys := map[string]string{}
+	keyWrapper := func(s string) string { return s }
+	if runtime.GOOS == "windows" {
+		fallbackKeys := map[string]any{}
+		keyWrapper = func(s string) string { return strings.ToUpper(s) }
+		Fallback_, Inject_ := Fallback, Inject
+		Fallback, Inject = make(map[string]string, len(Fallback_)), make(map[string]string, len(Inject))
+
+		for k, v := range Fallback_ {
+			kw := keyWrapper(k)
+			if _, ok := fallbackKeys[kw]; !ok {
+				fallbackKeys[kw] = nil
+				Fallback[k] = v
+			}
+		}
+		for k, v := range Inject_ {
+			kw := keyWrapper(k)
+			if _, ok := injectKeys[kw]; !ok {
+				injectKeys[kw] = ""
+				Inject[k] = v
+			}
+		}
+	} else {
+		injectKeys = Inject
+	}
+
 	for _, s := range Env {
 		k, _, _ := strings.Cut(s, "=")
 		// Mark key as existing in Env.
-		envKeys[k] = nil
+		envKeys[keyWrapper(k)] = nil
 		// If the key exists in Inject, it means Overwrite or Delete it.
-		if _, ok := Inject[k]; ok {
+		if _, ok := injectKeys[keyWrapper(k)]; ok {
 			continue
 		}
 		// Otherwise, keep the original string exactly as-is (preserving duplicates or weird formats).
@@ -135,11 +165,11 @@ func ApplyEnvFallbackAndInject(Env []string, Fallback, Inject map[string]string)
 	}
 
 	for k, v := range Fallback {
-		if _, ok := envKeys[k]; ok {
+		if _, ok := envKeys[keyWrapper(k)]; ok {
 			continue
 		}
 		// If the key is present in Inject, Inject takes precedence over Fallback.
-		if _, ok := Inject[k]; ok {
+		if _, ok := injectKeys[keyWrapper(k)]; ok {
 			continue
 		}
 		New = append(New, k+"="+v)
@@ -198,7 +228,20 @@ func NormalizeCommandConfig(cc_ CommandConfig) (cc CommandConfig, err error) {
 		if cc.EnvInject == nil {
 			cc.EnvInject = map[string]string{}
 		}
-		if _, ok := cc.EnvInject["PWD"]; !ok {
+
+		hasPWD := false
+		if runtime.GOOS == "windows" {
+			for k := range cc.EnvInject {
+				if strings.EqualFold(k, "PWD") {
+					hasPWD = true
+					break
+				}
+			}
+		} else {
+			_, hasPWD = cc.EnvInject["PWD"]
+		}
+
+		if !hasPWD {
 			cc.EnvInject["PWD"] = cc.Dir
 		}
 	}

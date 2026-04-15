@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"reflect"
+	"sort"
 	"syscall"
 	"testing"
 	"time"
@@ -68,6 +71,98 @@ func waitForProcessState(pid int, wantAlive bool, timeout time.Duration) bool {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+func sortedEnvUnix(env []string) []string {
+	out := append([]string(nil), env...)
+	sort.Strings(out)
+	return out
+}
+
+func assertEnvEqualUnix(t *testing.T, got, want []string) {
+	t.Helper()
+
+	got = sortedEnvUnix(got)
+	want = sortedEnvUnix(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("env mismatch: got %v, want %v", got, want)
+	}
+}
+
+func TestApplyEnvFallbackAndInject_UnixCaseSensitive(t *testing.T) {
+	t.Parallel()
+
+	got := crosspty.ApplyEnvFallbackAndInject(
+		[]string{"Path=original", "PATH=upper"},
+		map[string]string{"path": "fallback"},
+		map[string]string{"PATH": "override"},
+	)
+
+	assertEnvEqualUnix(t, got, []string{"Path=original", "PATH=override", "path=fallback"})
+}
+
+func TestApplyEnvFallbackAndInject_UnixDeleteIsCaseSensitive(t *testing.T) {
+	t.Parallel()
+
+	got := crosspty.ApplyEnvFallbackAndInject(
+		[]string{"Path=original", "PATH=upper"},
+		nil,
+		map[string]string{"PATH": ""},
+	)
+
+	assertEnvEqualUnix(t, got, []string{"Path=original"})
+}
+
+func TestNormalizeCommandConfig_UnixPWDCaseSensitive(t *testing.T) {
+	t.Parallel()
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("unable to locate test executable: %v", err)
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("unable to get working directory: %v", err)
+	}
+
+	cfg, err := crosspty.NormalizeCommandConfig(crosspty.CommandConfig{
+		Argv:        []string{exe},
+		Dir:         "workdir",
+		Env:         []string{},
+		EnvFallback: map[string]string{},
+		EnvInject:   map[string]string{"pwd": "manual"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	assertEnvEqualUnix(t, cfg.Env, []string{
+		"pwd=manual",
+		"PWD=" + filepath.Join(wd, "workdir"),
+	})
+}
+
+func TestNormalizeCommandConfig_UnixExplicitPWDStopsAutoInject(t *testing.T) {
+	t.Parallel()
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("unable to locate test executable: %v", err)
+	}
+
+	cfg, err := crosspty.NormalizeCommandConfig(crosspty.CommandConfig{
+		Argv:        []string{exe},
+		Dir:         "workdir",
+		Env:         []string{},
+		EnvFallback: map[string]string{},
+		EnvInject:   map[string]string{"PWD": "/custom"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	assertEnvEqualUnix(t, cfg.Env, []string{"PWD=/custom"})
 }
 
 func TestKillModeKillSubProcess_Unix(t *testing.T) {
