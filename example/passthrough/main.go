@@ -53,10 +53,13 @@ func main() {
 		restoreTerm()
 		os.Exit(2)
 	}, func() {
-		p.SetSize(crosspty.TermSize{
-			Rows: uint16(height),
-			Cols: uint16(width),
-		})
+		width, height, err := term.GetSize(int(os.Stdout.Fd()))
+		if err != nil {
+			p.SetSize(crosspty.TermSize{
+				Rows: uint16(height),
+				Cols: uint16(width),
+			})
+		}
 	})
 
 	if runtime.GOOS == "windows" {

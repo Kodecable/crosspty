@@ -16,8 +16,9 @@ var (
 	ErrUnacceptableTimeout = errors.New("crosspty: unacceptable timeout or delay")
 	ErrKillTimeout         = errors.New("crosspty: kill process timeout")
 
-	// Your Windows version does not support the ConPTY feature
-	ErrConPTYNotSupported = errors.New("crosspty: ConPTY not supported at this OS")
+	// ErrConPTYNotSupported indicates that the current Windows version does
+	// not support ConPTY.
+	ErrConPTYNotSupported = errors.New("crosspty: ConPTY not supported on this OS")
 )
 
 type TermSize struct {
@@ -30,10 +31,11 @@ type TermSize struct {
 type KillMode uint8
 
 const (
-	// For group-kill modes on Unix: if the direct PTY subprocess dead before one of
-	// its descendants, CrossPTY can still kill that process group, but zombie
-	// descendants still need to be reaped by init or another subreaper. Container
-	// environments such as Docker should ensure that a proper init/subreaper is present.
+	// For group-kill modes on Unix: if the direct PTY subprocess terminates before
+	// one of its descendants, CrossPTY can still kill that process group, but
+	// descendants that it kills may still remain as zombies until they are
+	// reaped by init or another subreaper. Container environments such as
+	// Docker should ensure that a proper init/subreaper is present.
 
 	// Kill the process group when the direct subprocess exits.
 	// On Windows, this starts the subprocess suspended, assigns it to a Job Object
@@ -81,18 +83,19 @@ type CloseConfig struct {
 
 type CommandConfig struct {
 	// e.g. []string{"/usr/bin/bash", "-i"}
-	//  - Recommend using an absolute full path as argv0.
+	//  - An absolute path is recommended for argv0.
 	//  - If argv0 is relative, it is resolved relative to Dir.
-	//  - If and only if argv0 contains no path separators, a exec.LookPath() is performed.
-	//  - (Windows only) If exec.LookPath() performed, it will try to add a missing file
+	//  - If and only if argv0 contains no path separators, exec.LookPath() is used.
+	//  - (Windows only) If exec.LookPath() is used, it may add a missing file
 	//    extension. This is only recommended for .exe files. If you want to use
 	//    .cmd/.bat, please use []string{"cmd.exe", "/C", "C:\\full\\foo.bat"}.
 	Argv []string
 
 	// default: os.Getwd()
-	// Working dir. Recommend using an absolute full path. If it is relative,
+	// Working directory. An absolute path is recommended. If it is relative,
 	// it is resolved relative to os.Getwd().
-	// Will also generate a `PWD` EnvInject if no such one unless EnvInject is explicit empty.
+	// A `PWD` entry is also added to EnvInject if one is not already present,
+	// unless EnvInject is explicitly empty.
 	Dir string
 
 	// default: os.Environ()
@@ -101,13 +104,13 @@ type CommandConfig struct {
 	Env []string
 
 	// default: {"TERM": "vt100"}
-	// Will be insert to Env if not set.
-	// Windows also have a `SYSTEMROOT` fallback by default.
+	// Inserted into Env if the key is not already set.
+	// On Windows, a `SYSTEMROOT` fallback is also provided by default.
 	EnvFallback map[string]string
 
 	// default: PWD
-	// Overwrite Env.
-	// Use {"A": ""} to delete key "A".
+	// Overrides entries in Env.
+	// Use {"A": ""} to delete the key "A".
 	EnvInject map[string]string
 
 	// default: 24x80
@@ -154,7 +157,7 @@ func ApplyEnvFallbackAndInject(Env []string, Fallback, Inject map[string]string)
 		k, _, _ := strings.Cut(s, "=")
 		// Mark key as existing in Env.
 		envKeys[keyWrapper(k)] = nil
-		// If the key exists in Inject, it means Overwrite or Delete it.
+		// If the key exists in Inject, it is overridden or deleted.
 		if _, ok := injectKeys[keyWrapper(k)]; ok {
 			continue
 		}
@@ -182,7 +185,7 @@ func ApplyEnvFallbackAndInject(Env []string, Fallback, Inject map[string]string)
 	return New
 }
 
-// Safe for repeated calls with the same value
+// NormalizeCommandConfig is safe to call repeatedly with the same value.
 func NormalizeCommandConfig(cc_ CommandConfig) (cc CommandConfig, err error) {
 	cc = cc_
 	wd, err := os.Getwd()
@@ -287,31 +290,37 @@ func normalizeCloseConfig(cc_ CloseConfig) (CloseConfig, error) {
 // It also manages the lifetime of a process attached to a pseudo-terminal.
 // Remember to handle escape sequences in the output.
 //
-// R/W concurrently:
-// Read and Write can safely occur concurrently.
-// Write concurrently will same as Write concurrently an os.File, should safe. Read too.
-//
 // Encoding:
-// In Unix, depends on you Env and config. At most case it's UTF-8.
-// In Windows, ConPTY will speak UTF-8 with you in theory.
+// On Unix, the encoding depends on your environment and process
+// configuration. In most modern setups, it is UTF-8.
+// On Windows, ConPTY communicates with the caller in UTF-8. Internally, it
+// assumes the process on the other side uses the system code page and
+// performs input/output conversion for you.
 type Pty interface {
-	// After the process dies, Write may or may not return an error, but it will not panic.
-	// After the process dies, Write generally will not block, but MIGHT BLOCK when write too much.
-	// You MUST NOT write after Close().
-	// Thread-safe.
+	// After the process exits, Write may or may not return an error, but it
+	// will not panic.
+	// After the process exits, Write usually does not block, but it MAY still
+	// block if too much data is written and the kernel buffer fills up.
+	// You MUST NOT call Write after Close().
+	// Thread-safe. It may be called concurrently with Read(). Concurrent Write
+	// calls behave the same way as concurrent writes to an os.File.
 	//
 	// For Windows:
-	// Your sub-process may have an ENABLE_LINE_INPUT by default. Which means
-	// They need a "\r\n" to read what you write.
+	// Your subprocess may have ENABLE_LINE_INPUT enabled by default, which
+	// means it may require "\r\n" before it reads what you write.
 	Write(d []byte) (n int, err error)
 
-	// If there is nothing to read and the fd is closed (usually, process dead), return io.EOF.
-	// After the fd is closed, you can still read remaining data (if any).
-	// You MUST NOT read after Close().
-	// Thread-safe.
+	// If there is nothing left to read and the fd has been closed (usually
+	// because the process has exited; note that "fd closed" does not mean
+	// "pty closed"), Read returns io.EOF.
+	// After the fd is closed, any remaining buffered data can still be read.
+	// You MUST NOT call Read after Close().
+	// Thread-safe. It may be called concurrently with Write(). Concurrent Read
+	// calls behave the same way as concurrent reads from an os.File.
 	Read(d []byte) (n int, err error)
 
-	// Kill sub-process and wait for it to die (with timeout), freeing resources.
+	// Kill the subprocess and wait for it to exit (subject to timeout),
+	// freeing resources.
 	// Will attempt graceful termination first (SIGHUP, CTRL_CLOSE_EVENT).
 	// Close() will not wait for Read/Write to finish; it may interrupt ongoing r/w.
 	// Thread-safe. Can be called multiple times.
@@ -325,12 +334,12 @@ type Pty interface {
 	//  - You still need to call Close() after Wait() to free resources.
 	//  - You do not have to call Wait() if you do not care about the exit code or process state.
 	//  - Thread-safe. Can be called multiple times from multiple goroutines.
-	//  - Returns the sub-process exit code (-1 means N/A, e.g., killed by signal).
+	//  - Returns the subprocess exit code (-1 means N/A, e.g., killed by signal).
 	//
 	// For Windows:
 	//  - Wait() may also return -1 when the exit code could not be retrieved or the
 	//    process could not be waited on (permission issues, etc.); in that case, the
-	//    sub-process may still be running.
+	//    subprocess may still be running.
 	//  - If the child is force-killed, the exit code may be determined by the killer.
 	//    This library uses 0 in that case.
 	Wait() int
@@ -338,8 +347,8 @@ type Pty interface {
 	// Thread-safe.
 	Pid() int
 
-	// Best-effort thread-safe. you MUST NOT setSize after Close().
-	// Windows will resend the whole screen when resize.
+	// Best-effort thread-safe. You MUST NOT call SetSize after Close().
+	// On Windows, resizing causes the entire screen to be resent.
 	SetSize(sz TermSize) error
 }
 
