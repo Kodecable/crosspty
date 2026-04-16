@@ -55,7 +55,7 @@ func main() {
 	}, func() {
 		width, height, err := term.GetSize(int(os.Stdout.Fd()))
 		if err != nil {
-			p.SetSize(crosspty.TermSize{
+			p.Resize(crosspty.TermSize{
 				Rows: uint16(height),
 				Cols: uint16(width),
 			})

@@ -165,6 +165,6 @@ func (p *ptyWin) Pid() int {
 	return int(p.processId)
 }
 
-func (p *ptyWin) SetSize(sz TermSize) error {
+func (p *ptyWin) Resize(sz TermSize) error {
 	return windows.ResizePseudoConsole(p.conPty, windowsCoord(sz))
 }

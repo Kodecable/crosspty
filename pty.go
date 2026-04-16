@@ -125,12 +125,12 @@ type CommandConfig struct {
 func ApplyEnvFallbackAndInject(Env []string, Fallback, Inject map[string]string) (New []string) {
 	New = []string{}
 	// Track keys present in the original Env to determine whether fallback values are needed.
-	envKeys := map[string]any{}
+	envKeys := map[string]struct{}{}
 
 	injectKeys := map[string]string{}
 	keyWrapper := func(s string) string { return s }
 	if runtime.GOOS == "windows" {
-		fallbackKeys := map[string]any{}
+		fallbackKeys := map[string]struct{}{}
 		keyWrapper = func(s string) string { return strings.ToUpper(s) }
 		Fallback_, Inject_ := Fallback, Inject
 		Fallback, Inject = make(map[string]string, len(Fallback_)), make(map[string]string, len(Inject))
@@ -138,7 +138,7 @@ func ApplyEnvFallbackAndInject(Env []string, Fallback, Inject map[string]string)
 		for k, v := range Fallback_ {
 			kw := keyWrapper(k)
 			if _, ok := fallbackKeys[kw]; !ok {
-				fallbackKeys[kw] = nil
+				fallbackKeys[kw] = struct{}{}
 				Fallback[k] = v
 			}
 		}
@@ -156,7 +156,7 @@ func ApplyEnvFallbackAndInject(Env []string, Fallback, Inject map[string]string)
 	for _, s := range Env {
 		k, _, _ := strings.Cut(s, "=")
 		// Mark key as existing in Env.
-		envKeys[keyWrapper(k)] = nil
+		envKeys[keyWrapper(k)] = struct{}{}
 		// If the key exists in Inject, it is overridden or deleted.
 		if _, ok := injectKeys[keyWrapper(k)]; ok {
 			continue
@@ -347,9 +347,10 @@ type Pty interface {
 	// Thread-safe.
 	Pid() int
 
-	// Best-effort thread-safe. You MUST NOT call SetSize after Close().
+	// Best-effort thread-safe. You MUST NOT call Resize after Close().
 	// On Windows, resizing causes the entire screen to be resent.
-	SetSize(sz TermSize) error
+	// On Unix, it will send SIGWINCH to subprocess.
+	Resize(sz TermSize) error
 }
 
 func Start(cc CommandConfig) (Pty, error) {

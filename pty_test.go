@@ -185,7 +185,7 @@ func TestPtySize(t *testing.T) {
 	}
 }
 
-func TestPtySetSize(t *testing.T) {
+func TestPtyResize(t *testing.T) {
 	sz1 := crosspty.TermSize{Rows: 24, Cols: 80}
 	sz2 := crosspty.TermSize{Rows: 32, Cols: 60}
 
@@ -213,7 +213,7 @@ func TestPtySetSize(t *testing.T) {
 		t.Fatalf("unable to read pty: %v", err)
 	}
 
-	err = p.SetSize(sz2)
+	err = p.Resize(sz2)
 	if err != nil {
 		t.Fatalf("unable to set pty size: %v", err)
 	}

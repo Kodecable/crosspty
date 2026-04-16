@@ -163,7 +163,7 @@ func (p *ptyUnix) Pid() int {
 	return p.cmd.Process.Pid
 }
 
-func (p *ptyUnix) SetSize(sz TermSize) error {
+func (p *ptyUnix) Resize(sz TermSize) error {
 	return creackpty.Setsize(p.file, creackptyWinsize(sz))
 }
 
