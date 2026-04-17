@@ -97,14 +97,18 @@ func StartWithSysProcAttr(cc CommandConfig, sys *syscall.SysProcAttr) (Pty, erro
 func (p *ptyWin) killProcess() error {
 	p.writePipe.Close() // trigger CTRL_CLOSE_EVENT
 
+	childExited := false
 	select {
 	case <-time.After(p.closeCfg.KillDelay):
 		break
 	case <-p.exitch:
-		return nil
+		childExited = true
 	}
 
 	if p.closeCfg.KillMode == KillModeKillSubProcess {
+		if childExited {
+			return nil
+		}
 		// doc: https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess
 		err := windows.TerminateProcess(p.processHandle, 0)
 		if err != nil {
@@ -120,6 +124,10 @@ func (p *ptyWin) killProcess() error {
 		if err != nil {
 			return err
 		}
+	}
+
+	if childExited {
+		return nil
 	}
 
 	select {
