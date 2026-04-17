@@ -28,7 +28,7 @@ func TestHelperProcessUnix(t *testing.T) {
 			fmt.Fprintf(os.Stderr, "start child: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("%d\n", cmd.Process.Pid)
+		writeHelperProtocolLine("PID", fmt.Sprintf("%d", cmd.Process.Pid))
 		os.Exit(0)
 	}
 	if os.Getenv("GO_WANT_HELPER_PROCESS_UNIX") == "2" {
@@ -37,7 +37,7 @@ func TestHelperProcessUnix(t *testing.T) {
 			fmt.Fprintf(os.Stderr, "start child: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("%d\n", cmd.Process.Pid)
+		writeHelperProtocolLine("PID", fmt.Sprintf("%d", cmd.Process.Pid))
 		os.Exit(0)
 	}
 }
@@ -45,14 +45,10 @@ func TestHelperProcessUnix(t *testing.T) {
 func readHelperPid(t *testing.T, p crosspty.Pty) int {
 	t.Helper()
 
-	line, err := bufio.NewReader(testutils.NewANSIStripper(p)).ReadString('\n')
-	if err != nil {
-		t.Fatalf("unable to read helper pid: %v", err)
-	}
-
 	var pid int
-	if _, err := fmt.Sscan(trimCmdOutput(line), &pid); err != nil {
-		t.Fatalf("unable to parse helper pid %q: %v", trimCmdOutput(line), err)
+	payload := readHelperProtocolLine(t, bufio.NewReader(testutils.NewANSIStripper(p)), "PID")
+	if _, err := fmt.Sscan(payload, &pid); err != nil {
+		t.Fatalf("unable to parse helper pid %q: %v", payload, err)
 	}
 	if pid <= 0 {
 		t.Fatalf("helper reported invalid pid %d", pid)

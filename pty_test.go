@@ -20,12 +20,55 @@ import (
 	"golang.org/x/term"
 )
 
+const helperProtocolPrefix = "CROSSPTY_HELPER "
+
 func trimCmdOutput(s string) string {
 	parts := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
 	for i := range parts {
 		parts[i] = strings.TrimSpace(parts[i])
 	}
 	return strings.TrimSpace(strings.Join(parts, "\n"))
+}
+
+func writeHelperProtocolLine(kind, payload string) {
+	if payload == "" {
+		fmt.Printf("%s%s\n", helperProtocolPrefix, kind)
+		return
+	}
+	fmt.Printf("%s%s %s\n", helperProtocolPrefix, kind, payload)
+}
+
+func parseHelperProtocolLine(line string) (kind, payload string, ok bool) {
+	line = trimCmdOutput(line)
+	if !strings.HasPrefix(line, helperProtocolPrefix) {
+		return "", "", false
+	}
+
+	rest := strings.TrimPrefix(line, helperProtocolPrefix)
+	kind, payload, ok = strings.Cut(rest, " ")
+	if !ok {
+		return rest, "", true
+	}
+	return kind, payload, true
+}
+
+func readHelperProtocolLine(t *testing.T, reader *bufio.Reader, wantKind string) string {
+	t.Helper()
+
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("unable to read helper %s line: %v", wantKind, err)
+		}
+
+		kind, payload, ok := parseHelperProtocolLine(line)
+		if !ok {
+			continue
+		}
+		if kind == wantKind {
+			return payload
+		}
+	}
 }
 
 func execAndCompare(cc crosspty.CommandConfig) error {
@@ -81,7 +124,7 @@ func TestVersion(t *testing.T) {
 func TestHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") == "1" {
 		for i := range 500 {
-			fmt.Printf("test line %d\n", i+1)
+			writeHelperProtocolLine("TEXT", fmt.Sprintf("test line %d", i+1))
 		}
 		os.Exit(0)
 	}
@@ -91,7 +134,7 @@ func TestHelperProcess(t *testing.T) {
 			fmt.Fprintf(os.Stderr, "error getting size: %v", err)
 			os.Exit(1)
 		}
-		fmt.Printf("%d %d\n", height, width)
+		writeHelperProtocolLine("SIZE", fmt.Sprintf("%d %d", height, width))
 		os.Exit(0)
 	}
 	if os.Getenv("GO_WANT_HELPER_PROCESS") == "3" {
@@ -100,7 +143,7 @@ func TestHelperProcess(t *testing.T) {
 			fmt.Fprintf(os.Stderr, "error getting size: %v", err)
 			os.Exit(1)
 		}
-		fmt.Printf("%d %d\n", height, width)
+		writeHelperProtocolLine("SIZE", fmt.Sprintf("%d %d", height, width))
 
 		testutils.Pause()
 
@@ -124,11 +167,11 @@ func TestHelperProcess(t *testing.T) {
 			time.Sleep(50 * time.Millisecond)
 		}
 
-		fmt.Printf("%d %d NEW\n", height2, width2)
+		writeHelperProtocolLine("SIZE_NEW", fmt.Sprintf("%d %d", height2, width2))
 		os.Exit(0)
 	}
 	if os.Getenv("GO_WANT_HELPER_PROCESS") == "4" {
-		fmt.Printf("%d\n", os.Getpid())
+		writeHelperProtocolLine("PID", fmt.Sprintf("%d", os.Getpid()))
 		os.Exit(0)
 	}
 }
@@ -176,7 +219,17 @@ func TestPtySize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unable to read pty: %v", err)
 	}
-	outStr := trimCmdOutput(string(out))
+	var outStr string
+	for _, line := range strings.Split(strings.ReplaceAll(string(out), "\r\n", "\n"), "\n") {
+		kind, payload, ok := parseHelperProtocolLine(line)
+		if ok && kind == "SIZE" {
+			outStr = payload
+			break
+		}
+	}
+	if outStr == "" {
+		t.Fatalf("unable to find helper SIZE output in %q", string(out))
+	}
 
 	var rows, cols int
 	fmt.Sscan(outStr, &rows, &cols)
@@ -208,10 +261,7 @@ func TestPtyResize(t *testing.T) {
 	defer p.Close()
 
 	reader := bufio.NewReader(testutils.NewANSIStripper(p))
-	line1, err := reader.ReadString('\n')
-	if err != nil {
-		t.Fatalf("unable to read pty: %v", err)
-	}
+	line1 := readHelperProtocolLine(t, reader, "SIZE")
 
 	err = p.Resize(sz2)
 	if err != nil {
@@ -219,22 +269,9 @@ func TestPtyResize(t *testing.T) {
 	}
 	_, _ = p.Write([]byte("\r\n"))
 
-	var line2 string
-	for {
-		// May be one input \n cause line.
-		// And ConPTY will resend old data when Resize.
+	line2 := readHelperProtocolLine(t, reader, "SIZE_NEW")
 
-		line2, err = reader.ReadString('\n')
-		if err != nil {
-			t.Fatalf("unable to read pty: %v", err)
-		}
-
-		if strings.HasSuffix(trimCmdOutput(line2), "NEW") {
-			break
-		}
-	}
-
-	outStr := trimCmdOutput(line1 + line2)
+	outStr := trimCmdOutput(line1 + "\n" + line2)
 
 	var rows1, cols1, rows2, cols2 int
 	fmt.Sscan(outStr, &rows1, &cols1, &rows2, &cols2)
@@ -262,11 +299,7 @@ func TestPtyPid(t *testing.T) {
 	}
 	defer p.Close()
 
-	line, err := bufio.NewReader(testutils.NewANSIStripper(p)).ReadString('\n')
-	if err != nil {
-		t.Fatalf("unable to read pty: %v", err)
-	}
-	ptyOutputStr := trimCmdOutput(line)
+	ptyOutputStr := readHelperProtocolLine(t, bufio.NewReader(testutils.NewANSIStripper(p)), "PID")
 	var ptyShReportedPid int
 	fmt.Sscan(ptyOutputStr, &ptyShReportedPid)
 	defer p.Write([]byte{'\n'})

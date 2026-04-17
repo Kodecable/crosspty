@@ -85,13 +85,13 @@ func parseHelperOutputWindows(t *testing.T, out string) map[string]string {
 
 	parsed := make(map[string]string)
 	for _, line := range strings.Split(strings.ReplaceAll(out, "\r\n", "\n"), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
+		kind, payload, ok := parseHelperProtocolLine(line)
+		if !ok || kind != "ENV" {
 			continue
 		}
-		key, value, ok := strings.Cut(line, "=")
+		key, value, ok := strings.Cut(payload, "=")
 		if !ok {
-			t.Fatalf("unexpected helper output line: %q", line)
+			t.Fatalf("unexpected helper ENV payload: %q", payload)
 		}
 		parsed[key] = value
 	}
@@ -101,14 +101,10 @@ func parseHelperOutputWindows(t *testing.T, out string) map[string]string {
 func readHelperPidWindows(t *testing.T, p crosspty.Pty) int {
 	t.Helper()
 
-	line, err := bufio.NewReader(testutils.NewANSIStripper(p)).ReadString('\n')
-	if err != nil {
-		t.Fatalf("unable to read helper pid: %v", err)
-	}
-
 	var pid int
-	if _, err := fmt.Sscan(trimCmdOutput(line), &pid); err != nil {
-		t.Fatalf("unable to parse helper pid %q: %v", trimCmdOutput(line), err)
+	payload := readHelperProtocolLine(t, bufio.NewReader(testutils.NewANSIStripper(p)), "PID")
+	if _, err := fmt.Sscan(payload, &pid); err != nil {
+		t.Fatalf("unable to parse helper pid %q: %v", payload, err)
 	}
 	if pid <= 0 {
 		t.Fatalf("helper reported invalid pid %d", pid)
@@ -159,9 +155,9 @@ func TestHelperProcessWindows(t *testing.T) {
 		goto maybeSpawnGrandchild
 	}
 
-	fmt.Printf("USERNAME=%s\n", os.Getenv("USERNAME"))
-	fmt.Printf("SYSTEMROOT=%s\n", os.Getenv("SYSTEMROOT"))
-	fmt.Printf("USERPROFILE=%s\n", os.Getenv("USERPROFILE"))
+	writeHelperProtocolLine("ENV", "USERNAME="+os.Getenv("USERNAME"))
+	writeHelperProtocolLine("ENV", "SYSTEMROOT="+os.Getenv("SYSTEMROOT"))
+	writeHelperProtocolLine("ENV", "USERPROFILE="+os.Getenv("USERPROFILE"))
 	os.Exit(0)
 
 maybeSpawnGrandchild:
@@ -179,7 +175,7 @@ maybeSpawnGrandchild:
 			os.Exit(1)
 		}
 
-		fmt.Printf("%d\n", cmd.Process.Pid)
+		writeHelperProtocolLine("PID", fmt.Sprintf("%d", cmd.Process.Pid))
 		os.Exit(0)
 	}
 
@@ -199,10 +195,12 @@ func TestStartWithSysProcAttr_TokenUsesCreateProcessAsUserAndTokenEnv(t *testing
 	token := duplicatePrimaryTokenForCurrentProcess(t)
 	defer token.Close()
 
+	coverDir := t.TempDir()
 	p, err := crosspty.StartWithSysProcAttr(crosspty.CommandConfig{
 		Argv: []string{exe, "-test.run=TestHelperProcessWindows"},
 		EnvInject: map[string]string{
 			helperProcessEnvKeyWindows: "1",
+			"GOCOVERDIR":               coverDir,
 		},
 	}, &syscall.SysProcAttr{Token: syscall.Token(token)})
 	if err != nil {
