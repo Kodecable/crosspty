@@ -4,6 +4,7 @@ package crosspty_test
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/Kodecable/crosspty"
 	"github.com/Kodecable/crosspty/internal/testutils"
@@ -22,6 +24,13 @@ import (
 
 const helperProcessEnvKeyWindows = "GO_WANT_HELPER_PROCESS_WINDOWS"
 const windowsStillActiveExitCode = 259
+const logon32LogonInteractive = 2
+const logon32ProviderDefault = 0
+
+var (
+	modAdvapi32   = windows.NewLazySystemDLL("advapi32.dll")
+	procLogonUser = modAdvapi32.NewProc("LogonUserW")
+)
 
 func sortedEnvWindows(env []string) []string {
 	out := append([]string(nil), env...)
@@ -150,18 +159,58 @@ func forceTerminateProcessWindows(pid int) {
 	_ = windows.TerminateProcess(handle, 1)
 }
 
-func TestHelperProcessWindows(t *testing.T) {
-	if os.Getenv(helperProcessEnvKeyWindows) != "1" {
-		goto maybeSpawnGrandchild
+func logonUserWindows(username, domain, password string) (windows.Token, error) {
+	usernamePtr, err := windows.UTF16PtrFromString(username)
+	if err != nil {
+		return 0, err
+	}
+	passwordPtr, err := windows.UTF16PtrFromString(password)
+	if err != nil {
+		return 0, err
 	}
 
-	writeHelperProtocolLine("ENV", "USERNAME="+os.Getenv("USERNAME"))
-	writeHelperProtocolLine("ENV", "SYSTEMROOT="+os.Getenv("SYSTEMROOT"))
-	writeHelperProtocolLine("ENV", "USERPROFILE="+os.Getenv("USERPROFILE"))
-	os.Exit(0)
+	var domainPtr *uint16
+	if domain != "" {
+		domainPtr, err = windows.UTF16PtrFromString(domain)
+		if err != nil {
+			return 0, err
+		}
+	}
 
-maybeSpawnGrandchild:
-	if os.Getenv(helperProcessEnvKeyWindows) == "2" {
+	var token windows.Token
+	r1, _, callErr := procLogonUser.Call(
+		uintptr(unsafe.Pointer(usernamePtr)),
+		uintptr(unsafe.Pointer(domainPtr)),
+		uintptr(unsafe.Pointer(passwordPtr)),
+		uintptr(logon32LogonInteractive),
+		uintptr(logon32ProviderDefault),
+		uintptr(unsafe.Pointer(&token)),
+	)
+	if r1 == 0 {
+		if callErr != nil && !errors.Is(callErr, windows.ERROR_SUCCESS) {
+			return 0, callErr
+		}
+		return 0, syscall.EINVAL
+	}
+
+	return token, nil
+}
+
+func TestHelperProcessWindows(t *testing.T) {
+	switch os.Getenv(helperProcessEnvKeyWindows) {
+	case "1":
+		whoamiOutput, err := exec.Command("whoami").CombinedOutput()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "unable to run whoami: %v: %s\n", err, strings.TrimSpace(string(whoamiOutput)))
+			os.Exit(1)
+		}
+
+		writeHelperProtocolLine("ENV", "USERNAME="+os.Getenv("USERNAME"))
+		writeHelperProtocolLine("ENV", "SYSTEMROOT="+os.Getenv("SYSTEMROOT"))
+		writeHelperProtocolLine("ENV", "USERPROFILE="+os.Getenv("USERPROFILE"))
+		writeHelperProtocolLine("ENV", "WHOAMI="+strings.TrimSpace(string(whoamiOutput)))
+		os.Exit(0)
+	case "2":
 		exe, err := os.Executable()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "unable to locate helper executable: %v\n", err)
@@ -177,9 +226,7 @@ maybeSpawnGrandchild:
 
 		writeHelperProtocolLine("PID", fmt.Sprintf("%d", cmd.Process.Pid))
 		os.Exit(0)
-	}
-
-	if os.Getenv(helperProcessEnvKeyWindows) == "3" {
+	case "3":
 		for {
 			time.Sleep(500 * time.Millisecond)
 		}
@@ -225,6 +272,59 @@ func TestStartWithSysProcAttr_TokenUsesCreateProcessAsUserAndTokenEnv(t *testing
 	}
 	if parsed["USERPROFILE"] == "" {
 		t.Fatalf("expected USERPROFILE, got output %q", string(out))
+	}
+}
+
+func TestStartWithSysProcAttr_TokenUserSwitchIntegration(t *testing.T) {
+	username := os.Getenv("CROSSPTY_USER_SWITCH_USERNAME")
+	password := os.Getenv("CROSSPTY_USER_SWITCH_PASSWORD")
+	domain := os.Getenv("CROSSPTY_USER_SWITCH_DOMAIN")
+	if username == "" || password == "" {
+		t.Skip("user-switch integration env not configured")
+	}
+	if domain == "" {
+		domain = os.Getenv("COMPUTERNAME")
+	}
+
+	token, err := logonUserWindows(username, domain, password)
+	if err != nil {
+		t.Fatalf("LogonUserW failed for %s\\%s: %v", domain, username, err)
+	}
+	defer token.Close()
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("unable to locate test executable: %v", err)
+	}
+
+	p, err := crosspty.StartWithSysProcAttr(crosspty.CommandConfig{
+		Argv: []string{exe, "-test.run=TestHelperProcessWindows"},
+		EnvInject: map[string]string{
+			helperProcessEnvKeyWindows: "1",
+		},
+	}, &syscall.SysProcAttr{Token: syscall.Token(token)})
+	if err != nil {
+		t.Fatalf("StartWithSysProcAttr failed: %v", err)
+	}
+	defer p.Close()
+
+	out, err := io.ReadAll(testutils.NewANSIStripper(p))
+	if err != nil {
+		t.Fatalf("unable to read pty output: %v", err)
+	}
+	if exitCode := p.Wait(); exitCode != 0 {
+		t.Fatalf("expected helper exit code 0, got %d with output %q", exitCode, string(out))
+	}
+
+	parsed := parseHelperOutputWindows(t, string(out))
+	if !strings.EqualFold(parsed["USERNAME"], username) {
+		t.Fatalf("expected USERNAME=%q, got %q, output=%q", username, parsed["USERNAME"], string(out))
+	}
+
+	wantWhoamiSuffix := `\` + strings.ToLower(username)
+	gotWhoami := strings.ToLower(parsed["WHOAMI"])
+	if !strings.HasSuffix(gotWhoami, wantWhoamiSuffix) {
+		t.Fatalf("expected WHOAMI to end with %q, got %q, output=%q", wantWhoamiSuffix, parsed["WHOAMI"], string(out))
 	}
 }
 

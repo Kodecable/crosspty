@@ -60,3 +60,48 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  windows-user-switch:
+    name: windows-2025 user-switch
+    runs-on: windows-2025
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Create temporary local user
+        shell: pwsh
+        run: |
+          $username = "cpty$($env:GITHUB_RUN_ID)$($env:GITHUB_RUN_ATTEMPT)"
+          $passwordPlain = "Cpty!Aa1$([guid]::NewGuid().ToString('N'))"
+          $password = ConvertTo-SecureString $passwordPlain -AsPlainText -Force
+
+          if (Get-LocalUser -Name $username -ErrorAction SilentlyContinue) {
+            Remove-LocalUser -Name $username
+          }
+
+          New-LocalUser -Name $username -Password $password -PasswordNeverExpires | Out-Null
+
+          "CROSSPTY_USER_SWITCH_USERNAME=$username" >> $env:GITHUB_ENV
+          "CROSSPTY_USER_SWITCH_PASSWORD=$passwordPlain" >> $env:GITHUB_ENV
+          "CROSSPTY_USER_SWITCH_DOMAIN=$env:COMPUTERNAME" >> $env:GITHUB_ENV
+
+      - name: Run user-switch integration test
+        shell: pwsh
+        run: |
+          go test -run TestStartWithSysProcAttr_TokenUserSwitchIntegration -count=1 -v -timeout=10m .
+
+      - name: Cleanup temporary local user
+        if: always()
+        shell: pwsh
+        run: |
+          $username = $env:CROSSPTY_USER_SWITCH_USERNAME
+          if ($username -and (Get-LocalUser -Name $username -ErrorAction SilentlyContinue)) {
+            Remove-LocalUser -Name $username
+          }
