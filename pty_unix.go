@@ -71,7 +71,7 @@ func StartExecCmd(cmd *exec.Cmd, sz TermSize, closeConfig CloseConfig) (Pty, err
 		cmd.Wait()
 		p.exitCode = cmd.ProcessState.ExitCode()
 		if p.closeCfg.KillMode == KillModeKillGroupOnSubProcessExit {
-			p.killProcess(true)
+			p.signal(true, p.closeCfg.KillSignal)
 		}
 		close(p.exitch)
 	}()
@@ -91,7 +91,7 @@ func (p *ptyUnix) Read(d []byte) (n int, err error) {
 	return
 }
 
-func (p *ptyUnix) killProcessUnix(group bool) error {
+func (p *ptyUnix) signalUnix(group bool, signal syscall.Signal) error {
 	pid := p.cmd.Process.Pid
 	if group {
 		if pid > 1 {
@@ -102,13 +102,18 @@ func (p *ptyUnix) killProcessUnix(group bool) error {
 			pid = -pid
 		}
 	}
-	return syscall.Kill(pid, p.closeCfg.KillSignal)
+	return syscall.Kill(pid, signal)
 }
 
 func (p *ptyUnix) Close() (err error) {
 	p.closer.Do(func() {
 		defer closePidFD(p.pidFD)
-		p.file.Close() // trigger SIGHUP
+		if p.closeCfg.TermSignal == 0 {
+			p.file.Close() // trigger SIGHUP
+		} else {
+			defer p.file.Close()
+			p.signal(p.closeCfg.TermSignalGroup, p.closeCfg.TermSignal)
+		}
 
 		select {
 		case <-time.After(p.closeCfg.KillDelay):
@@ -119,7 +124,7 @@ func (p *ptyUnix) Close() (err error) {
 			}
 		}
 
-		err = p.killProcess(p.closeCfg.KillMode != KillModeKillSubProcess)
+		err = p.signal(p.closeCfg.KillMode != KillModeKillSubProcess, p.closeCfg.KillSignal)
 		if err != nil {
 			if errors.Is(err, syscall.ESRCH) {
 				// It's dead, ok

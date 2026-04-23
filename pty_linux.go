@@ -31,20 +31,20 @@ func (p *ptyUnix) setSysProcAttr(cmd *exec.Cmd) {
 	cmd.SysProcAttr.PidFD = &p.pidFD
 }
 
-func (p *ptyUnix) killProcess(group bool) (err error) {
+func (p *ptyUnix) signal(group bool, signal syscall.Signal) (err error) {
 	const PIDFD_SIGNAL_PROCESS_GROUP = 4 // (since linux 6.9)
 
 	if p.pidFD == -1 {
-		return p.killProcessUnix(group)
+		return p.signalUnix(group, signal)
 	} else {
 		if group {
-			err = unix.PidfdSendSignal(p.pidFD, p.closeCfg.KillSignal, nil, PIDFD_SIGNAL_PROCESS_GROUP)
+			err = unix.PidfdSendSignal(p.pidFD, signal, nil, PIDFD_SIGNAL_PROCESS_GROUP)
 			if errors.Is(err, syscall.EINVAL) {
-				return p.killProcessUnix(group)
+				return p.signalUnix(group, signal)
 			}
 			return err
 		} else {
-			return unix.PidfdSendSignal(p.pidFD, p.closeCfg.KillSignal, nil, 0)
+			return unix.PidfdSendSignal(p.pidFD, signal, nil, 0)
 		}
 	}
 }

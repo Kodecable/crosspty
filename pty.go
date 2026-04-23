@@ -77,6 +77,16 @@ type CloseConfig struct {
 	// default: SIGKILL
 	KillSignal syscall.Signal
 
+	// Unix only. default: 0.
+	// By default, CrossPTY closes the PTY FD to deliver SIGHUP to the
+	// subprocess. If TermSignal is not 0, CrossPTY sends TermSignal first and
+	// closes the FD when Close() returns. If TermSignalGroup is true, the
+	// signal is sent to the subprocess group instead of just the subprocess.
+	// This is useful when your subprocess treats SIGHUP as a reload signal, or
+	// when you want to keep I/O available until the end of Close().
+	TermSignal      syscall.Signal
+	TermSignalGroup bool
+
 	// default: KillModeKillGroupOnSubProcessExit
 	KillMode KillMode
 }
@@ -321,7 +331,8 @@ type Pty interface {
 
 	// Kill the subprocess and wait for it to exit (subject to timeout),
 	// freeing resources.
-	// Will attempt graceful termination first (SIGHUP, CTRL_CLOSE_EVENT).
+	// Will attempt graceful termination first (SIGHUP, CTRL_CLOSE_EVENT, or
+	// TermSignal).
 	// Close() will not wait for Read/Write to finish; it may interrupt ongoing r/w.
 	// Thread-safe. Can be called multiple times.
 	Close() error

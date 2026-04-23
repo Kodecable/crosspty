@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -39,6 +41,90 @@ func TestHelperProcessUnix(t *testing.T) {
 		}
 		writeHelperProtocolLine("PID", fmt.Sprintf("%d", cmd.Process.Pid))
 		os.Exit(0)
+	}
+	if os.Getenv("GO_WANT_HELPER_PROCESS_UNIX") == "3" {
+		exe, err := os.Executable()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "locate exe: %v\n", err)
+			os.Exit(1)
+		}
+
+		readyR, readyW, err := os.Pipe()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "create ready pipe: %v\n", err)
+			os.Exit(1)
+		}
+
+		cmd := exec.Command(exe, "-test.run=TestHelperProcessUnix")
+		cmd.Env = append(os.Environ(),
+			"GO_WANT_HELPER_PROCESS_UNIX=4",
+			"GO_WANT_HELPER_READY_FD=3",
+		)
+		cmd.ExtraFiles = []*os.File{readyW}
+		if err := cmd.Start(); err != nil {
+			fmt.Fprintf(os.Stderr, "start child: %v\n", err)
+			os.Exit(1)
+		}
+		readyW.Close()
+		var ready [1]byte
+		if _, err := readyR.Read(ready[:]); err != nil {
+			fmt.Fprintf(os.Stderr, "wait child ready: %v\n", err)
+			os.Exit(1)
+		}
+		readyR.Close()
+		writeHelperProtocolLine("PID", fmt.Sprintf("%d", cmd.Process.Pid))
+		waitForUnixCommitSignal()
+	}
+	if os.Getenv("GO_WANT_HELPER_PROCESS_UNIX") == "4" {
+		waitForUnixSignalSequence()
+	}
+}
+
+func waitForUnixSignalSequence() {
+	sigCh := make(chan os.Signal, 8)
+	signal.Notify(sigCh, syscall.SIGHUP, syscall.SIGUSR1, syscall.SIGUSR2)
+	defer signal.Stop(sigCh)
+
+	if fdStr := os.Getenv("GO_WANT_HELPER_READY_FD"); fdStr != "" {
+		fd, err := strconv.Atoi(fdStr)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "parse ready fd: %v\n", err)
+			os.Exit(1)
+		}
+		readyFile := os.NewFile(uintptr(fd), "ready")
+		if readyFile == nil {
+			fmt.Fprintln(os.Stderr, "open ready fd: nil")
+			os.Exit(1)
+		}
+		if _, err := readyFile.Write([]byte{1}); err != nil {
+			fmt.Fprintf(os.Stderr, "write ready: %v\n", err)
+			os.Exit(1)
+		}
+		readyFile.Close()
+	}
+
+	armed := false
+	for sig := range sigCh {
+		switch sig {
+		case syscall.SIGUSR1:
+			armed = true
+		case syscall.SIGUSR2:
+			if armed {
+				os.Exit(0)
+			}
+		}
+	}
+}
+
+func waitForUnixCommitSignal() {
+	sigCh := make(chan os.Signal, 8)
+	signal.Notify(sigCh, syscall.SIGHUP, syscall.SIGUSR1, syscall.SIGUSR2)
+	defer signal.Stop(sigCh)
+
+	for sig := range sigCh {
+		if sig == syscall.SIGUSR2 {
+			os.Exit(0)
+		}
 	}
 }
 
@@ -214,5 +300,52 @@ func TestKillModeKillSubProcess_Unix(t *testing.T) {
 
 	if !waitForProcessState(childPID, true, 500*time.Millisecond) {
 		t.Fatalf("expected child %d to stay alive after Close() in KillSubProcess mode", childPID)
+	}
+}
+
+func TestTermSignalGroupFalse_Unix(t *testing.T) {
+	testTermSignalGroupUnix(t, false, true)
+}
+
+func TestTermSignalGroupTrue_Unix(t *testing.T) {
+	testTermSignalGroupUnix(t, true, false)
+}
+
+func testTermSignalGroupUnix(t *testing.T, termSignalGroup bool, wantChildAlive bool) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal("uable to locate exe:", err)
+	}
+
+	p, err := crosspty.Start(crosspty.CommandConfig{
+		Argv: []string{exe, "-test.run=TestHelperProcessUnix"},
+		EnvInject: map[string]string{
+			"GO_WANT_HELPER_PROCESS_UNIX": "3",
+		},
+		CloseConfig: crosspty.CloseConfig{
+			TermSignal:      syscall.SIGUSR1,
+			TermSignalGroup: termSignalGroup,
+			KillSignal:      syscall.SIGUSR2,
+			CloseTimeout:    2 * time.Second,
+			KillDelay:       200 * time.Millisecond,
+			KillMode:        crosspty.KillModeKillGroupOnClose,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unable to start pty: %v", err)
+	}
+
+	childPID := readHelperPid(t, p)
+	defer syscall.Kill(childPID, syscall.SIGKILL)
+
+	if err := p.Close(); err != nil {
+		t.Fatalf("unable to close pty: %v", err)
+	}
+
+	if !waitForProcessState(childPID, wantChildAlive, 500*time.Millisecond) {
+		if wantChildAlive {
+			t.Fatalf("expected child %d to stay alive when TermSignalGroup is false", childPID)
+		}
+		t.Fatalf("expected child %d to exit when TermSignalGroup is true", childPID)
 	}
 }
