@@ -369,6 +369,42 @@ func TestKillModeKillGroupOnClose_Windows(t *testing.T) {
 	}
 }
 
+func TestCloseKillExitCode_WindowsKillSubProcess(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("unable to locate test executable: %v", err)
+	}
+
+	const wantExitCode = 23
+	p, err := crosspty.Start(crosspty.CommandConfig{
+		Argv: []string{exe, "-test.run=TestPtySIGKILL"},
+		CloseConfig: crosspty.CloseConfig{
+			CloseTimeout: 2 * time.Second,
+			KillDelay:    200 * time.Millisecond,
+			KillMode:     crosspty.KillModeKillSubProcess,
+			KillExitCode: wantExitCode,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unable to start pty: %v", err)
+	}
+
+	line, err := bufio.NewReader(testutils.NewANSIStripper(p)).ReadString('\n')
+	if err != nil {
+		t.Fatalf("unable to read pty output: %v", err)
+	}
+	if got := trimCmdOutput(line); got != "ready" {
+		t.Fatalf("expected helper readiness line, got %q", got)
+	}
+
+	if err := p.Close(); err != nil {
+		t.Fatalf("unable to close pty: %v", err)
+	}
+	if exitCode := p.Wait(); exitCode != wantExitCode {
+		t.Fatalf("expected forced exit code %d, got %d", wantExitCode, exitCode)
+	}
+}
+
 func TestApplyEnvFallbackAndInject_WindowsCaseInsensitive(t *testing.T) {
 	t.Parallel()
 

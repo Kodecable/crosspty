@@ -110,7 +110,7 @@ func (p *ptyWin) killProcess() error {
 			return nil
 		}
 		// doc: https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess
-		err := windows.TerminateProcess(p.processHandle, 0)
+		err := windows.TerminateProcess(p.processHandle, p.closeCfg.KillExitCode)
 		if err != nil {
 			// > After a process has terminated, call to TerminateProcess with
 			// > open handles to the process fails with ERROR_ACCESS_DENIED (5)
@@ -120,7 +120,7 @@ func (p *ptyWin) killProcess() error {
 			}
 		}
 	} else {
-		err := windows.TerminateJobObject(p.jobHandle, 0)
+		err := windows.TerminateJobObject(p.jobHandle, p.closeCfg.KillExitCode)
 		if err != nil {
 			return err
 		}

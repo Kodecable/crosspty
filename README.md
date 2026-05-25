@@ -48,3 +48,4 @@ Windows implementation is refactored and derived from:
  - [photostorm/pty](https://github.com/photostorm/pty) (License: `licenses/LICENSE_photostorm`)
  - [ActiveState/termtest/conpty](https://github.com/ActiveState/termtest/tree/master/conpty) (License: `licenses/LICENSE_ActiveState`)
  - Certain functions adapted from the [Go Standard Library](https://github.com/golang/go) (License: `licenses/LICENSE_go`)
+ 

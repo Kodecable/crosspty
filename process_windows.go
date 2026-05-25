@@ -128,7 +128,7 @@ func (p *ptyWin) processWaiter() {
 	} else {
 		p.exitCode = int(exitCode)
 		if p.closeCfg.KillMode == KillModeKillGroupOnSubProcessExit {
-			windows.TerminateJobObject(p.jobHandle, 0)
+			windows.TerminateJobObject(p.jobHandle, p.closeCfg.KillExitCode)
 		}
 	}
 }

@@ -87,6 +87,11 @@ type CloseConfig struct {
 	TermSignal      syscall.Signal
 	TermSignalGroup bool
 
+	// Windows only. default: 0.
+	// Windows requires an explicit exit code when force kill a process
+	// or job object. CrossPTY uses this value in that case.
+	KillExitCode uint32
+
 	// default: KillModeKillGroupOnSubProcessExit
 	KillMode KillMode
 }
@@ -351,8 +356,8 @@ type Pty interface {
 	//  - Wait() may also return -1 when the exit code could not be retrieved or the
 	//    process could not be waited on (permission issues, etc.); in that case, the
 	//    subprocess may still be running.
-	//  - If the child is force-killed, the exit code may be determined by the killer.
-	//    This library uses 0 in that case.
+	//  - If the child is force-killed, the exit code may be determined by the
+	//    terminator. On Windows, CrossPTY uses CloseConfig.KillExitCode.
 	Wait() int
 
 	// Thread-safe.
