@@ -54,7 +54,7 @@ func main() {
 		os.Exit(2)
 	}, func() {
 		width, height, err := term.GetSize(int(os.Stdout.Fd()))
-		if err != nil {
+		if err == nil {
 			p.Resize(crosspty.TermSize{
 				Rows: uint16(height),
 				Cols: uint16(width),
@@ -70,7 +70,7 @@ func main() {
 	go func() {
 		_, _ = io.Copy(p, os.Stdin)
 	}()
-	_, err = io.Copy(os.Stdout, p)
+	_, _ = io.Copy(os.Stdout, p)
 
 	exitCode := p.Wait()
 	restoreTerm()
