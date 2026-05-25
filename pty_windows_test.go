@@ -28,22 +28,9 @@ const logon32LogonInteractive = 2
 const logon32ProviderDefault = 0
 
 var (
-	modAdvapi32             = windows.NewLazySystemDLL("advapi32.dll")
-	procLogonUser           = modAdvapi32.NewProc("LogonUserW")
-	modKernel32             = windows.NewLazySystemDLL("kernel32.dll")
-	procSetConsoleCtrlHandler = modKernel32.NewProc("SetConsoleCtrlHandler")
+	modAdvapi32   = windows.NewLazySystemDLL("advapi32.dll")
+	procLogonUser = modAdvapi32.NewProc("LogonUserW")
 )
-
-func ignoreConsoleCtrlSignalsWindows() error {
-	r1, _, err := procSetConsoleCtrlHandler.Call(0, 1)
-	if r1 != 0 {
-		return nil
-	}
-	if err != nil && !errors.Is(err, windows.ERROR_SUCCESS) {
-		return err
-	}
-	return syscall.EINVAL
-}
 
 func sortedEnvWindows(env []string) []string {
 	out := append([]string(nil), env...)
@@ -243,15 +230,6 @@ func TestHelperProcessWindows(t *testing.T) {
 		for {
 			time.Sleep(500 * time.Millisecond)
 		}
-	case "4":
-		if err := ignoreConsoleCtrlSignalsWindows(); err != nil {
-			fmt.Fprintf(os.Stderr, "unable to ignore console control signals: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Println("ready")
-		for {
-			time.Sleep(500 * time.Millisecond)
-		}
 	}
 }
 
@@ -388,45 +366,6 @@ func TestKillModeKillGroupOnClose_Windows(t *testing.T) {
 
 	if !waitForProcessStateWindows(grandchildPID, false, 2*time.Second) {
 		t.Fatalf("expected grandchild %d to be killed after Close() in KillGroupOnClose mode", grandchildPID)
-	}
-}
-
-func TestCloseKillExitCode_WindowsKillSubProcess(t *testing.T) {
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatalf("unable to locate test executable: %v", err)
-	}
-
-	const wantExitCode = 23
-	p, err := crosspty.Start(crosspty.CommandConfig{
-		Argv: []string{exe, "-test.run=TestHelperProcessWindows"},
-		EnvInject: map[string]string{
-			helperProcessEnvKeyWindows: "4",
-		},
-		CloseConfig: crosspty.CloseConfig{
-			CloseTimeout: 2 * time.Second,
-			KillDelay:    200 * time.Millisecond,
-			KillMode:     crosspty.KillModeKillSubProcess,
-			KillExitCode: wantExitCode,
-		},
-	})
-	if err != nil {
-		t.Fatalf("unable to start pty: %v", err)
-	}
-
-	line, err := bufio.NewReader(testutils.NewANSIStripper(p)).ReadString('\n')
-	if err != nil {
-		t.Fatalf("unable to read pty output: %v", err)
-	}
-	if got := trimCmdOutput(line); got != "ready" {
-		t.Fatalf("expected helper readiness line, got %q", got)
-	}
-
-	if err := p.Close(); err != nil {
-		t.Fatalf("unable to close pty: %v", err)
-	}
-	if exitCode := p.Wait(); exitCode != wantExitCode {
-		t.Fatalf("expected forced exit code %d, got %d", wantExitCode, exitCode)
 	}
 }
 

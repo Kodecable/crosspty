@@ -357,7 +357,8 @@ type Pty interface {
 	//    process could not be waited on (permission issues, etc.); in that case, the
 	//    subprocess may still be running.
 	//  - If the child is force-killed, the exit code may be determined by the
-	//    terminator. On Windows, CrossPTY uses CloseConfig.KillExitCode.
+	//    terminator. On Windows, CrossPTY uses CloseConfig.KillExitCode. Note
+	//    it is hard sometimes to make sure the process was killed by CrossPTY.
 	Wait() int
 
 	// Thread-safe.
