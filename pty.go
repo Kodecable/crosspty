@@ -31,6 +31,9 @@ type TermSize struct {
 type KillMode uint8
 
 const (
+	// This library is not designed for isolation or security. Processes do have
+	// the ability to break away. Use containers or sandboxes for such requirements.
+
 	// For group-kill modes on Unix: if the direct PTY subprocess terminates before
 	// one of its descendants, CrossPTY can still kill that process group, but
 	// descendants that it kills may still remain as zombies until they are
@@ -88,7 +91,7 @@ type CloseConfig struct {
 	TermSignalGroup bool
 
 	// Windows only. default: 0.
-	// Windows requires an explicit exit code when force kill a process
+	// Windows requires an explicit exit code when forcibly killing a process
 	// or job object. CrossPTY uses this value in that case.
 	KillExitCode uint32
 

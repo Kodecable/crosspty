@@ -86,7 +86,7 @@ func (p *ptyWin) createProcess(cc CommandConfig, sys *syscall.SysProcAttr) error
 	p.processId = pi.ProcessId
 	p.processHandle = pi.Process
 
-	err = makeConPTYAutoCloseReadPipe(p.conPty)
+	err = makeConPTYAutoCloseOutputPipe(p.conPty)
 	if err != nil {
 		windows.TerminateProcess(p.processHandle, 0)
 		return err

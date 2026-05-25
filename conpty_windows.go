@@ -17,7 +17,7 @@ var (
 	procReleasePseudoConsole = kernel32.NewProc("ReleasePseudoConsole")
 )
 
-func ProbeConPTYFeature() bool {
+func IsConPTYSupported() bool {
 	if procCreatePseudoConsole.Find() != nil {
 		return false
 	}
@@ -29,7 +29,7 @@ func windowsCoord(sz TermSize) windows.Coord {
 }
 
 func (p *ptyWin) openConPTY(sz TermSize) error {
-	if !ProbeConPTYFeature() {
+	if !IsConPTYSupported() {
 		return ErrConPTYNotSupported
 	}
 
@@ -93,7 +93,7 @@ type oldWindowsConPTYLayout struct {
 // which differs from the Unix PTY behavior.
 // > After calling this function, the pseudoconsole will automatically exit once all clients have disconnected.
 // > All you need to do now is to read from or write to your output and input pipe handles until they return a failure.
-func makeConPTYAutoCloseReadPipe(conpty windows.Handle) error {
+func makeConPTYAutoCloseOutputPipe(conpty windows.Handle) error {
 	if err := procReleasePseudoConsole.Find(); err == nil {
 		// Only Windows 11 24H2 (build 26100) / Windows Server 2025 (build 26100) or later.
 		// 6 years after ConPTY released. well, good job.
