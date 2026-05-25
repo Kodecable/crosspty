@@ -28,9 +28,22 @@ const logon32LogonInteractive = 2
 const logon32ProviderDefault = 0
 
 var (
-	modAdvapi32   = windows.NewLazySystemDLL("advapi32.dll")
-	procLogonUser = modAdvapi32.NewProc("LogonUserW")
+	modAdvapi32             = windows.NewLazySystemDLL("advapi32.dll")
+	procLogonUser           = modAdvapi32.NewProc("LogonUserW")
+	modKernel32             = windows.NewLazySystemDLL("kernel32.dll")
+	procSetConsoleCtrlHandler = modKernel32.NewProc("SetConsoleCtrlHandler")
 )
+
+func ignoreConsoleCtrlSignalsWindows() error {
+	r1, _, err := procSetConsoleCtrlHandler.Call(0, 1)
+	if r1 != 0 {
+		return nil
+	}
+	if err != nil && !errors.Is(err, windows.ERROR_SUCCESS) {
+		return err
+	}
+	return syscall.EINVAL
+}
 
 func sortedEnvWindows(env []string) []string {
 	out := append([]string(nil), env...)
@@ -231,6 +244,10 @@ func TestHelperProcessWindows(t *testing.T) {
 			time.Sleep(500 * time.Millisecond)
 		}
 	case "4":
+		if err := ignoreConsoleCtrlSignalsWindows(); err != nil {
+			fmt.Fprintf(os.Stderr, "unable to ignore console control signals: %v\n", err)
+			os.Exit(1)
+		}
 		fmt.Println("ready")
 		for {
 			time.Sleep(500 * time.Millisecond)
