@@ -230,6 +230,11 @@ func TestHelperProcessWindows(t *testing.T) {
 		for {
 			time.Sleep(500 * time.Millisecond)
 		}
+	case "4":
+		fmt.Println("ready")
+		for {
+			time.Sleep(500 * time.Millisecond)
+		}
 	}
 }
 
@@ -377,7 +382,10 @@ func TestCloseKillExitCode_WindowsKillSubProcess(t *testing.T) {
 
 	const wantExitCode = 23
 	p, err := crosspty.Start(crosspty.CommandConfig{
-		Argv: []string{exe, "-test.run=TestPtySIGKILL"},
+		Argv: []string{exe, "-test.run=TestHelperProcessWindows"},
+		EnvInject: map[string]string{
+			helperProcessEnvKeyWindows: "4",
+		},
 		CloseConfig: crosspty.CloseConfig{
 			CloseTimeout: 2 * time.Second,
 			KillDelay:    200 * time.Millisecond,
