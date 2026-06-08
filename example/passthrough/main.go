@@ -20,13 +20,13 @@ func main() {
 	}
 	width, height, err := term.GetSize(int(os.Stdout.Fd()))
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "uable to get terminal size: %v\n", err)
+		fmt.Fprintf(os.Stderr, "unable to get terminal size: %v\n", err)
 		os.Exit(1)
 	}
 
 	err = setupTerm()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "uable to setup term: %v\n", err)
+		fmt.Fprintf(os.Stderr, "unable to setup term: %v\n", err)
 		os.Exit(1)
 	}
 	defer restoreTerm()
@@ -44,7 +44,7 @@ func main() {
 		},
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "uable to start pty: %v\n", err)
+		fmt.Fprintf(os.Stderr, "unable to start pty: %v\n", err)
 		os.Exit(1)
 	}
 	defer p.Close()

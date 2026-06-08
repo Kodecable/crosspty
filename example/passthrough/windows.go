@@ -34,12 +34,12 @@ func enableWinVTMode(fd int) (uint32, error) {
 func setupTerm() (err error) {
 	origStdinState, err = term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
-		return fmt.Errorf("uable to make stdin raw: %v\n", err)
+		return fmt.Errorf("unable to make stdin raw: %v\n", err)
 	}
 	origStdoutState, err = enableWinVTMode(int(os.Stdout.Fd()))
 	if err != nil {
 		term.Restore(int(os.Stdin.Fd()), origStdinState)
-		return fmt.Errorf("uable to enable stdout vt mode: %v\n", err)
+		return fmt.Errorf("unable to enable stdout vt mode: %v\n", err)
 	}
 	return nil
 }

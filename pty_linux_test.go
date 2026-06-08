@@ -14,7 +14,7 @@ import (
 func TestKillModeKillGroupOnClose_PidfdOnly(t *testing.T) {
 	exe, err := os.Executable()
 	if err != nil {
-		t.Fatal("uable to locate exe:", err)
+		t.Fatal("unable to locate exe:", err)
 	}
 
 	p, err := crosspty.Start(crosspty.CommandConfig{

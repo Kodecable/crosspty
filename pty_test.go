@@ -179,7 +179,7 @@ func TestHelperProcess(t *testing.T) {
 func TestLongText(t *testing.T) {
 	exe, err := os.Executable()
 	if err != nil {
-		t.Fatal("uable to locate exe:", err)
+		t.Fatal("unable to locate exe:", err)
 	}
 
 	cc := crosspty.CommandConfig{
@@ -199,7 +199,7 @@ func TestPtySize(t *testing.T) {
 
 	exe, err := os.Executable()
 	if err != nil {
-		t.Fatal("uable to locate exe:", err)
+		t.Fatal("unable to locate exe:", err)
 	}
 
 	cc := crosspty.CommandConfig{
@@ -244,7 +244,7 @@ func TestPtyResize(t *testing.T) {
 
 	exe, err := os.Executable()
 	if err != nil {
-		t.Fatal("uable to locate exe:", err)
+		t.Fatal("unable to locate exe:", err)
 	}
 
 	cc := crosspty.CommandConfig{
@@ -284,7 +284,7 @@ func TestPtyResize(t *testing.T) {
 func TestPtyPid(t *testing.T) {
 	exe, err := os.Executable()
 	if err != nil {
-		t.Fatal("uable to locate exe:", err)
+		t.Fatal("unable to locate exe:", err)
 	}
 
 	cc := crosspty.CommandConfig{
@@ -337,7 +337,7 @@ func TestPtySIGKILL(t *testing.T) {
 
 	err = p.Close()
 	if err != nil {
-		t.Fatalf("uable to kill nohup: %v", err)
+		t.Fatalf("unable to kill nohup: %v", err)
 	}
 }
 
