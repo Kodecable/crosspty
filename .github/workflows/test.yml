@@ -21,19 +21,21 @@ jobs:
           - kernel: 4.4.302
             kernel-tag: v4.4.302
             force-9p: true
-            version: v4.4-gcc-gnu89-hostcc-9p
+            version: v4.4-gcc-gnu89-hostcc-no-stack-9p
             compiler: gnu89
+            kconfig: .github/kconfigs/legacy-kernel.config
             expect-pidfd: unavailable
           - kernel: 4.15.18
             kernel-tag: v4.15.18
             force-9p: true
-            version: v4.15-gcc-gnu89-hostcc-9p
+            version: v4.15-gcc-gnu89-hostcc-no-stack-9p
             compiler: gnu89
+            kconfig: .github/kconfigs/legacy-kernel.config
             expect-pidfd: unavailable
           - kernel: 5.4.302
             kernel-tag: v5.4.302
-            force-9p: false
-            version: v5.4-virtiofs
+            force-9p: true
+            version: v5.4-9p
             compiler: default
             expect-pidfd: available
           - kernel: 5.15.180
@@ -91,6 +93,7 @@ jobs:
           kernel-tag: ${{ matrix.kernel-tag }}
           version: ${{ matrix.version }}
           force-9p: ${{ matrix.force-9p }}
+          kconfig: ${{ matrix.kconfig }}
           cc: ${{ steps.kernel-compiler.outputs.cc }}
           hostcc: ${{ steps.kernel-compiler.outputs.hostcc }}
           vmlinux-h: false
