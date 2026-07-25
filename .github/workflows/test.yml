@@ -21,13 +21,13 @@ jobs:
           - kernel: 4.4.302
             kernel-tag: v4.4.302
             force-9p: true
-            version: v4.4-gcc-gnu89-9p
+            version: v4.4-gcc-gnu89-hostcc-9p
             compiler: gnu89
             expect-pidfd: unavailable
           - kernel: 4.15.18
             kernel-tag: v4.15.18
             force-9p: true
-            version: v4.15-gcc-gnu89-9p
+            version: v4.15-gcc-gnu89-hostcc-9p
             compiler: gnu89
             expect-pidfd: unavailable
           - kernel: 5.4.302
@@ -64,6 +64,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Download Go modules for VM
+        run: go mod download
+
       - name: Prepare kernel compiler
         id: kernel-compiler
         shell: bash
@@ -72,13 +75,16 @@ jobs:
             compiler="$RUNNER_TEMP/crosspty-gcc-gnu89"
             printf '%s\n' '#!/bin/sh' 'exec gcc "$@" -std=gnu89' > "$compiler"
             chmod +x "$compiler"
+            hostcc="$(command -v gcc)"
           else
             compiler=""
+            hostcc=""
           fi
           echo "cc=$compiler" >> "$GITHUB_OUTPUT"
+          echo "hostcc=$hostcc" >> "$GITHUB_OUTPUT"
 
       - name: Run tests in Linux ${{ matrix.kernel }} VM
-        uses: Kodecable/fork-vng-action@e21a83c018c849dd1c99f0e91460e53361293b26
+        uses: Kodecable/fork-vng-action@cbf4ea11427a53ada6f0cc93a5a4fd602f659881
         with:
           name: crosspty-linux-${{ matrix.kernel }}
           kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
@@ -86,6 +92,7 @@ jobs:
           version: ${{ matrix.version }}
           force-9p: ${{ matrix.force-9p }}
           cc: ${{ steps.kernel-compiler.outputs.cc }}
+          hostcc: ${{ steps.kernel-compiler.outputs.hostcc }}
           vmlinux-h: false
           run: |
             set -eu
