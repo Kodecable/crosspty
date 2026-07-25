@@ -33,7 +33,20 @@ func TestKillModeKillGroupOnClose_PidfdOnly(t *testing.T) {
 	}
 
 	linuxPty, ok := p.(crosspty.PtyLinux)
-	if !ok || linuxPty.PidFD() == -1 {
+	hasPidfd := ok && linuxPty.PidFD() != -1
+	switch os.Getenv("CROSSPTY_EXPECT_PIDFD") {
+	case "available":
+		if !hasPidfd {
+			_ = p.Close()
+			t.Fatal("expected pidfd to be available")
+		}
+	case "unavailable":
+		if hasPidfd {
+			_ = p.Close()
+			t.Fatal("expected pidfd to be unavailable")
+		}
+	}
+	if !hasPidfd {
 		//go io.Copy(io.Discard, p)
 		_ = p.Close()
 		t.Skip("pidfd unavailable")

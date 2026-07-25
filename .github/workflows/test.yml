@@ -10,7 +10,98 @@ permissions:
   contents: read
 
 jobs:
-  go-test:
+  go-test-linux:
+    name: linux ${{ matrix.kernel }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kernel: 4.4.302
+            kernel-tag: v4.4.302
+            force-9p: true
+            version: v4.4-gcc-gnu89-9p
+            compiler: gnu89
+            expect-pidfd: unavailable
+          - kernel: 4.15.18
+            kernel-tag: v4.15.18
+            force-9p: true
+            version: v4.15-gcc-gnu89-9p
+            compiler: gnu89
+            expect-pidfd: unavailable
+          - kernel: 5.4.302
+            kernel-tag: v5.4.302
+            force-9p: false
+            version: v5.4-virtiofs
+            compiler: default
+            expect-pidfd: available
+          - kernel: 5.15.180
+            kernel-tag: v5.15.180
+            force-9p: false
+            version: v5.15-virtiofs
+            compiler: default
+            expect-pidfd: available
+          - kernel: 6.8.12
+            kernel-tag: v6.8.12
+            force-9p: false
+            version: v6.8-virtiofs
+            compiler: default
+            expect-pidfd: available
+          - kernel: 7.0.9
+            kernel-tag: v7.0.9
+            force-9p: false
+            version: v7.0-virtiofs
+            compiler: default
+            expect-pidfd: available
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Prepare kernel compiler
+        id: kernel-compiler
+        shell: bash
+        run: |
+          if [ "${{ matrix.compiler }}" = "gnu89" ]; then
+            compiler="$RUNNER_TEMP/crosspty-gcc-gnu89"
+            printf '%s\n' '#!/bin/sh' 'exec gcc "$@" -std=gnu89' > "$compiler"
+            chmod +x "$compiler"
+          else
+            compiler=""
+          fi
+          echo "cc=$compiler" >> "$GITHUB_OUTPUT"
+
+      - name: Run tests in Linux ${{ matrix.kernel }} VM
+        uses: Kodecable/fork-vng-action@e21a83c018c849dd1c99f0e91460e53361293b26
+        with:
+          name: crosspty-linux-${{ matrix.kernel }}
+          kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+          kernel-tag: ${{ matrix.kernel-tag }}
+          version: ${{ matrix.version }}
+          force-9p: ${{ matrix.force-9p }}
+          cc: ${{ steps.kernel-compiler.outputs.cc }}
+          vmlinux-h: false
+          run: |
+            set -eu
+            uname -a
+            case "$(uname -r)" in
+              ${{ matrix.kernel }}*) ;;
+              *) echo "unexpected guest kernel: $(uname -r)" >&2; exit 1 ;;
+            esac
+            CROSSPTY_EXPECT_PIDFD=${{ matrix.expect-pidfd }} go test -coverprofile coverage.txt -count=1 -v -timeout=10m ./...
+
+      - name: Upload results to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  go-test-windows:
     name: ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
@@ -18,8 +109,6 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - ubuntu-22.04
-          - ubuntu-24.04
           - windows-2022
           - windows-2025
 
