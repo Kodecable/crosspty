@@ -186,8 +186,17 @@ jobs:
       - name: Run tests
         run: |
           set -eu
+          case "${{ matrix.os.name }}" in
+            openbsd)
+              export PATH="/usr/local/bin:$PATH"
+              ;;
+            netbsd)
+              export PATH="/usr/pkg/bin:$PATH"
+              ;;
+          esac
           uname -a
           go version
+          go run ./cmd/ptyprobe -count=3
           go test -coverprofile coverage.txt -count=1 -v -timeout=10m ./...
 
       - name: Upload results to Codecov
