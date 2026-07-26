@@ -86,13 +86,15 @@ jobs:
           echo "hostcc=$hostcc" >> "$GITHUB_OUTPUT"
 
       - name: Run tests in Linux ${{ matrix.kernel }} VM
-        uses: Kodecable/fork-vng-action@cbf4ea11427a53ada6f0cc93a5a4fd602f659881
+        uses: Kodecable/fork-vng-action@f03d101895186f2d35879fe3dda946aaa89da211
         with:
           name: crosspty-linux-${{ matrix.kernel }}
           kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
           kernel-tag: ${{ matrix.kernel-tag }}
           version: ${{ matrix.version }}
           force-9p: ${{ matrix.force-9p }}
+          disable-kvm: true
+          qemu-opts: -cpu qemu64
           kconfig: ${{ matrix.kconfig }}
           cc: ${{ steps.kernel-compiler.outputs.cc }}
           hostcc: ${{ steps.kernel-compiler.outputs.hostcc }}
