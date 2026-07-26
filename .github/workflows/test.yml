@@ -25,10 +25,10 @@ jobs:
             compiler: gnu89
             kconfig: .github/kconfigs/legacy-kernel.config
             expect-pidfd: unavailable
-          - kernel: 4.14.336
-            kernel-tag: v4.14.336
+          - kernel: 4.19.325
+            kernel-tag: v4.19.325
             force-9p: true
-            version: v4.14-gcc-gnu89-hostcc-no-stack-9p
+            version: v4.19-gcc-gnu89-hostcc-no-stack-9p
             compiler: gnu89
             kconfig: .github/kconfigs/legacy-kernel.config
             expect-pidfd: unavailable
