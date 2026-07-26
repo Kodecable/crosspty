@@ -25,10 +25,10 @@ jobs:
             compiler: gnu89
             kconfig: .github/kconfigs/legacy-kernel.config
             expect-pidfd: unavailable
-          - kernel: 4.15.18
-            kernel-tag: v4.15.18
+          - kernel: 4.14.336
+            kernel-tag: v4.14.336
             force-9p: true
-            version: v4.15-gcc-gnu89-hostcc-no-stack-9p
+            version: v4.14-gcc-gnu89-hostcc-no-stack-9p
             compiler: gnu89
             kconfig: .github/kconfigs/legacy-kernel.config
             expect-pidfd: unavailable
@@ -38,22 +38,22 @@ jobs:
             version: v5.4-9p
             compiler: default
             expect-pidfd: available
-          - kernel: 5.15.180
-            kernel-tag: v5.15.180
+          - kernel: 5.15.211
+            kernel-tag: v5.15.211
             force-9p: false
             version: v5.15-virtiofs
             compiler: default
             expect-pidfd: available
-          - kernel: 6.8.12
-            kernel-tag: v6.8.12
+          - kernel: 6.6.144
+            kernel-tag: v6.6.144
             force-9p: false
-            version: v6.8-virtiofs
+            version: v6.6-virtiofs
             compiler: default
             expect-pidfd: available
-          - kernel: 7.0.9
-            kernel-tag: v7.0.9
+          - kernel: 6.18.39
+            kernel-tag: v6.18.39
             force-9p: false
-            version: v7.0-virtiofs
+            version: v6.18-virtiofs
             compiler: default
             expect-pidfd: available
 
