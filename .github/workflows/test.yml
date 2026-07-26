@@ -75,7 +75,7 @@ jobs:
         run: |
           if [ "${{ matrix.compiler }}" = "gnu89" ]; then
             compiler="$RUNNER_TEMP/crosspty-gcc-gnu89"
-            printf '%s\n' '#!/bin/sh' 'exec gcc "$@" -std=gnu89' > "$compiler"
+            printf '%s\n' '#!/bin/sh' 'exec gcc "$@" -std=gnu89 -fcommon' > "$compiler"
             chmod +x "$compiler"
             hostcc="$(command -v gcc)"
           else
