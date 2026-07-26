@@ -134,6 +134,67 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
 
+  go-test-bsd:
+    name: ${{ matrix.os.name }} ${{ matrix.os.version }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: cpa.sh {0}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - name: freebsd
+            version: '15.1'
+          - name: openbsd
+            version: '7.9'
+          - name: netbsd
+            version: '10.1'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Start ${{ matrix.os.name }} VM
+        uses: cross-platform-actions/action@v1.3.0
+        with:
+          operating_system: ${{ matrix.os.name }}
+          architecture: x86-64
+          version: ${{ matrix.os.version }}
+
+      - name: Install Go
+        run: |
+          set -eu
+
+          case "${{ matrix.os.name }}" in
+            freebsd)
+              sudo pkg install -y go
+              ;;
+            openbsd)
+              sudo pkg_add go
+              ;;
+            netbsd)
+              sudo pkgin -y install go
+              ;;
+            *)
+              echo "unsupported OS: ${{ matrix.os.name }}" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Run tests
+        run: |
+          set -eu
+          uname -a
+          go version
+          go test -coverprofile coverage.txt -count=1 -v -timeout=10m ./...
+
+      - name: Upload results to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+
   go-test-race:
     name: ubuntu-24.04 race
     runs-on: ubuntu-24.04
