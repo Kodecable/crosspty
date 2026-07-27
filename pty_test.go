@@ -21,6 +21,7 @@ import (
 )
 
 const helperProtocolPrefix = "CROSSPTY_HELPER "
+const echoStressTargetBytes = 1 << 20
 
 func trimCmdOutput(s string) string {
 	parts := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
@@ -83,7 +84,7 @@ func isBSD() bool {
 }
 
 // shellQuoteArg wraps s in single quotes, escaping internal single quotes
-// via the POSIX '\'' idiom so the result is safe inside `sh -c`.
+// via the POSIX '\” idiom so the result is safe inside `sh -c`.
 func shellQuoteArg(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
@@ -238,6 +239,22 @@ func TestHelperProcess(t *testing.T) {
 		writeHelperProtocolLine("PID", fmt.Sprintf("%d", os.Getpid()))
 		if isBSD() {
 			time.Sleep(time.Second)
+		}
+		os.Exit(0)
+	}
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "5" {
+		restore, err := term.MakeRaw(int(os.Stdin.Fd()))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "unable to set raw mode: %v", err)
+			os.Exit(1)
+		}
+		defer term.Restore(int(os.Stdin.Fd()), restore)
+
+		writeHelperProtocolLine("READY", "echo")
+
+		if _, err := io.Copy(os.Stdout, os.Stdin); err != nil {
+			fmt.Fprintf(os.Stderr, "echo helper copy failed: %v", err)
+			os.Exit(1)
 		}
 		os.Exit(0)
 	}
@@ -405,6 +422,50 @@ func TestPtySIGKILL(t *testing.T) {
 	err = p.Close()
 	if err != nil {
 		t.Fatalf("unable to kill nohup: %v", err)
+	}
+}
+
+func TestPtyEchoStress(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal("unable to locate exe:", err)
+	}
+
+	p, err := crosspty.Start(crosspty.CommandConfig{
+		Argv: []string{exe, "-test.run=TestHelperProcess"},
+		EnvInject: map[string]string{
+			"GO_WANT_HELPER_PROCESS": "5",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unable to start pty: %v", err)
+	}
+	defer p.Close()
+
+	reader := bufio.NewReader(p)
+	if payload := readHelperProtocolLine(t, reader, "READY"); payload != "echo" {
+		t.Fatalf("unexpected helper READY payload: %q", payload)
+	}
+	totalWritten := 0
+
+	for i := 0; totalWritten < echoStressTargetBytes; i++ {
+		line := fmt.Sprintf("%020d\n", i)
+		n, err := p.Write([]byte(line))
+		if err != nil {
+			t.Fatalf("unable to write echo line %d: %v", i, err)
+		}
+		if n != len(line) {
+			t.Fatalf("short write on echo line %d: wrote %d want %d", i, n, len(line))
+		}
+		totalWritten += n
+
+		got, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("unable to read echo line %d: %v", i, err)
+		}
+		if strings.ReplaceAll(got, "\r\n", "\n") != line {
+			t.Fatalf("echo mismatch on line %d: got %q want %q", i, got, line)
+		}
 	}
 }
 
