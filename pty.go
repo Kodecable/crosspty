@@ -97,6 +97,26 @@ type CloseConfig struct {
 
 	// default: KillModeKillGroupOnSubProcessExit
 	KillMode KillMode
+
+	// FreeBSD, OpenBSD, and NetBSD only. Default: 50ms.
+	//
+	// These systems may discard unread PTY output when the last slave file
+	// descriptor closes. As a best-effort mitigation After the direct
+	// subprocess exits, CrossPTY keeps its parent-side slave descriptor open
+	// for this duration, giving the caller time to read pending output before
+	// the descriptor is closed. Consequently, EOF may be delayed by up to the
+	// same duration. An explicit Close() call ends the retention period
+	// immediately.
+	//
+	// This race is most likely when the direct subprocess exits before first
+	// read call begins, particularly for very short-lived subprocesses. No
+	// data loss has been observed for longer-running subprocesses while Read
+	// is called continuously.
+	//
+	// A nil pointer selects the default duration. A non-nil zero or negative
+	// duration disables this mitigation, so CrossPTY closes its parent-side
+	// slave descriptor immediately after starting the subprocess.
+	OutputGraceTime *time.Duration
 }
 
 type CommandConfig struct {
@@ -301,7 +321,23 @@ func normalizeCloseConfig(cc_ CloseConfig) (CloseConfig, error) {
 		cc.KillSignal = syscall.SIGKILL
 	}
 
+	if isOutputGraceTimePlatform() {
+		if cc.OutputGraceTime == nil {
+			d := 50 * time.Millisecond
+			cc.OutputGraceTime = &d
+		}
+	}
+
 	return cc, nil
+}
+
+func isOutputGraceTimePlatform() bool {
+	switch runtime.GOOS {
+	case "freebsd", "openbsd", "netbsd":
+		return true
+	default:
+		return false
+	}
 }
 
 // Pty represents a pseudo-terminal session.
@@ -328,10 +364,17 @@ type Pty interface {
 	// means it may require "\r\n" before it reads what you write.
 	Write(d []byte) (n int, err error)
 
-	// If there is nothing left to read and the fd has been closed (usually
-	// because the process has exited; note that "fd closed" does not mean
-	// "pty closed"), Read returns io.EOF.
-	// After the fd is closed, any remaining buffered data can still be read.
+	// Read returns io.EOF when no more PTY output can be read. Process exit and
+	// PTY EOF are distinct: another process may still hold the slave descriptor
+	// and continue writing after the direct subprocess exits.
+	//
+	// Except on FreeBSD, OpenBSD, and NetBSD, any remaining buffered output can
+	// still be read after the last slave descriptor closes.
+	// On FreeBSD, OpenBSD, and NetBSD, unread output may be discarded when the
+	// last slave descriptor closes. See CloseConfig.OutputGraceTime for the
+	// best-effort retention mechanism and its effect on EOF timing. Callers
+	// should continue reading until io.EOF to minimize the risk of data loss.
+	//
 	// You MUST NOT call Read after Close().
 	// Thread-safe. It may be called concurrently with Write(). Concurrent Read
 	// calls behave the same way as concurrent reads from an os.File.

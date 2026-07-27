@@ -183,6 +183,28 @@ jobs:
               ;;
           esac
 
+      - name: PTY probe
+        continue-on-error: true
+        run: |
+          set -eu
+          case "${{ matrix.os.name }}" in
+            openbsd)
+              export PATH="/usr/local/bin:$PATH"
+              ;;
+            netbsd)
+              go_bin="$(find /usr/pkg -path '*/bin/go' \( -type f -o -type l \) -print | head -n 1)"
+              if [ -z "$go_bin" ] || [ ! -x "$go_bin" ]; then
+                pkg_info -a | sed -n '/^go/p'
+                echo "unable to locate the installed Go toolchain" >&2
+                exit 1
+              fi
+              export PATH="$(dirname "$go_bin"):/usr/pkg/bin:$PATH"
+              ;;
+          esac
+          uname -a
+          go version
+          go run ./cmd/ptyprobe -count=3
+
       - name: Run tests
         run: |
           set -eu
@@ -191,12 +213,16 @@ jobs:
               export PATH="/usr/local/bin:$PATH"
               ;;
             netbsd)
-              export PATH="/usr/pkg/bin:$PATH"
+              go_bin="$(find /usr/pkg -path '*/bin/go' \( -type f -o -type l \) -print | head -n 1)"
+              if [ -z "$go_bin" ] || [ ! -x "$go_bin" ]; then
+                pkg_info -a | sed -n '/^go/p'
+                echo "unable to locate the installed Go toolchain" >&2
+                exit 1
+              fi
+              export PATH="$(dirname "$go_bin"):/usr/pkg/bin:$PATH"
               ;;
           esac
-          uname -a
           go version
-          go run ./cmd/ptyprobe -count=3
           go test -coverprofile coverage.txt -count=1 -v -timeout=10m ./...
 
       - name: Upload results to Codecov

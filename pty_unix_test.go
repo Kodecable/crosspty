@@ -349,3 +349,40 @@ func testTermSignalGroupUnix(t *testing.T, termSignalGroup bool, wantChildAlive 
 		t.Fatalf("expected child %d to exit when TermSignalGroup is true", childPID)
 	}
 }
+
+func TestOutputGraceTime_ReadAfterWait_BSD(t *testing.T) {
+	switch runtime.GOOS {
+	case "freebsd", "openbsd", "netbsd":
+	default:
+		t.Skip("BSD-specific PTY close semantics")
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal("unable to locate exe:", err)
+	}
+
+	grace := 200 * time.Millisecond
+	p, err := crosspty.Start(crosspty.CommandConfig{
+		Argv: []string{exe, "-test.run=TestHelperProcess"},
+		EnvInject: map[string]string{
+			"GO_WANT_HELPER_PROCESS": "4",
+		},
+		CloseConfig: crosspty.CloseConfig{
+			OutputGraceTime: &grace,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unable to start pty: %v", err)
+	}
+	defer p.Close()
+
+	if exitCode := p.Wait(); exitCode != 0 {
+		t.Fatalf("helper exited with code %d", exitCode)
+	}
+
+	payload := readHelperProtocolLine(t, bufio.NewReader(testutils.NewANSIStripper(p)), "PID")
+	if strings.TrimSpace(payload) == "" {
+		t.Fatal("expected helper PID output after Wait(), got empty payload")
+	}
+}

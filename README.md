@@ -104,7 +104,7 @@ p, _ := crosspty.StartWithSysProcAttr(cc, &syscall.SysProcAttr{
 
 **Unix-like Systems**
 
-CrossPTY uses [creack/pty](https://github.com/creack/pty) for its Unix implementation. It supports any Linux kernel configured with UNIX 98 pseudo-terminal support (`CONFIG_UNIX98_PTYS=y`) and the `/dev/ptmx` device.
+CrossPTY uses [creack/pty](https://github.com/creack/pty) for its Unix implementation. On Linux, it requires UNIX 98 pseudo-terminal support (`CONFIG_UNIX98_PTYS=y`) and the `/dev/ptmx` device. Although the underlying implementation may work on other Unix-like systems, CrossPTY is designed for and tested on Linux, FreeBSD, OpenBSD, and NetBSD only. Other Unix-like systems are supported on a best-effort basis and are not covered by CrossPTY's behavioral compatibility guarantees.
 
 **Windows**
 
