@@ -1,6 +1,6 @@
 # CrossPTY
 
-Cross-platform pseudo-terminal (PTY) library written in pure Go with **built-in process lifecycle management** and **explicit behavior contract**.
+Cross-platform pseudo-terminal (PTY) library written in pure Go with **built-in process lifecycle management** and **explicit cross-platform behavior contract**.
 
 ## Installation
 
@@ -43,7 +43,7 @@ p, _ := crosspty.Start(crosspty.CommandConfig{
 defer p.Close()
 ```
 
-Three strategies (KillMode) control how child process trees are handled; check `pty.go` for details.
+`KillMode` control how child process trees are handled; check `pty.go` for details.
 
 **Three-tier environment variables**
 
@@ -106,9 +106,13 @@ p, _ := crosspty.StartWithSysProcAttr(cc, &syscall.SysProcAttr{
 
 CrossPTY uses [creack/pty](https://github.com/creack/pty) for its Unix implementation. On Linux, it requires UNIX 98 pseudo-terminal support (`CONFIG_UNIX98_PTYS=y`) and the `/dev/ptmx` device.
 
+CI tested on: Linux 4.4, 5.4, 5.15, 6.6, 6.18; FreeBSD 15.1; OpenBSD 7.9; NetBSD 10.1.
+
 **Windows**
 
 CrossPTY uses ConPTY API, which requires Windows 10 October 2018 Update (version 1809) or Windows Server 2019 or later.
+
+CI tested on: Windows Server 2022, 2025.
 
 ## Credit
 

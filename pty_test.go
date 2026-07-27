@@ -426,6 +426,11 @@ func TestPtySIGKILL(t *testing.T) {
 }
 
 func TestPtyEchoStress(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// Windows are too slow.
+		t.Skip("Skip Pty Echo Stress test in windows")
+	}
+
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal("unable to locate exe:", err)
