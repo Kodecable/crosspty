@@ -1,3 +1,4 @@
 ignore:
   - "example"
   - "internal/testutils"
+  - "cmd/ptyprobe"

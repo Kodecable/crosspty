@@ -71,6 +71,40 @@ func readHelperProtocolLine(t *testing.T, reader *bufio.Reader, wantKind string)
 	}
 }
 
+// isBSD reports whether the current GOOS is affected by the PTY output
+// teardown paths described in the package doc (FreeBSD, OpenBSD, NetBSD,
+// Darwin). Used by tests to apply the trailing-delay workaround.
+func isBSD() bool {
+	switch runtime.GOOS {
+	case "freebsd", "openbsd", "netbsd", "darwin":
+		return true
+	}
+	return false
+}
+
+// shellQuoteArg wraps s in single quotes, escaping internal single quotes
+// via the POSIX '\'' idiom so the result is safe inside `sh -c`.
+func shellQuoteArg(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+// shellJoinArgs quotes and joins argv into a single POSIX shell command line.
+func shellJoinArgs(argv []string) string {
+	quoted := make([]string, len(argv))
+	for i, a := range argv {
+		quoted[i] = shellQuoteArg(a)
+	}
+	return strings.Join(quoted, " ")
+}
+
+// wrapArgvForBSDShortLived rewrites argv as `sh -c "<quoted>; sleep 1"` so
+// that a session leader (sh) stays alive briefly after the real command
+// exits, preventing the BSD kernel from revoking/flushing the controlling
+// TTY before the test can read trailing PTY output.
+func wrapArgvForBSDShortLived(argv []string) []string {
+	return []string{"sh", "-c", shellJoinArgs(argv) + "; sleep 1"}
+}
+
 func execAndCompare(cc crosspty.CommandConfig) error {
 	cc, err := crosspty.NormalizeCommandConfig(cc)
 	if err != nil {
@@ -113,6 +147,9 @@ func TestVersion(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		argv = []string{"cmd", "/c", "ver"}
 	}
+	if isBSD() {
+		argv = wrapArgvForBSDShortLived(argv)
+	}
 
 	if err := execAndCompare(crosspty.CommandConfig{
 		Argv: argv,
@@ -126,6 +163,9 @@ func TestHelperProcess(t *testing.T) {
 		for i := range 500 {
 			writeHelperProtocolLine("TEXT", fmt.Sprintf("test line %d", i+1))
 		}
+		if isBSD() {
+			time.Sleep(time.Second)
+		}
 		os.Exit(0)
 	}
 	if os.Getenv("GO_WANT_HELPER_PROCESS") == "2" {
@@ -135,6 +175,9 @@ func TestHelperProcess(t *testing.T) {
 			os.Exit(1)
 		}
 		writeHelperProtocolLine("SIZE", fmt.Sprintf("%d %d", height, width))
+		if isBSD() {
+			time.Sleep(time.Second)
+		}
 		os.Exit(0)
 	}
 	if os.Getenv("GO_WANT_HELPER_PROCESS") == "3" {
@@ -168,10 +211,16 @@ func TestHelperProcess(t *testing.T) {
 		}
 
 		writeHelperProtocolLine("SIZE_NEW", fmt.Sprintf("%d %d", height2, width2))
+		if isBSD() {
+			time.Sleep(time.Second)
+		}
 		os.Exit(0)
 	}
 	if os.Getenv("GO_WANT_HELPER_PROCESS") == "4" {
 		writeHelperProtocolLine("PID", fmt.Sprintf("%d", os.Getpid()))
+		if isBSD() {
+			time.Sleep(time.Second)
+		}
 		os.Exit(0)
 	}
 }
@@ -457,6 +506,9 @@ func TestWriteAfterProcessDead(t *testing.T) {
 	argv := []string{"uname", "-a"}
 	if runtime.GOOS == "windows" {
 		argv = []string{"cmd", "/c", "ver"}
+	}
+	if isBSD() {
+		argv = wrapArgvForBSDShortLived(argv)
 	}
 
 	p, err := crosspty.Start(crosspty.CommandConfig{

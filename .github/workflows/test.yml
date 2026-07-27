@@ -203,7 +203,6 @@ jobs:
           esac
           uname -a
           go version
-          go run ./cmd/ptyprobe -count=3
 
       - name: Run tests
         run: |
