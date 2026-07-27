@@ -105,6 +105,24 @@ func wrapArgvForBSDShortLived(argv []string) []string {
 	return []string{"sh", "-c", shellJoinArgs(argv) + "; sleep 1"}
 }
 
+func mustFindTestCommand(t *testing.T) string {
+	t.Helper()
+
+	candidates := []string{"sh", "uname", "env", "pwd", "true", "cat"}
+	if runtime.GOOS == "windows" {
+		candidates = []string{"cmd", "where", "hostname"}
+	}
+
+	for _, name := range candidates {
+		if _, err := exec.LookPath(name); err == nil {
+			return name
+		}
+	}
+
+	t.Fatal("unable to find a suitable command in PATH for NormalizeCommandConfig tests")
+	return ""
+}
+
 func execAndCompare(cc crosspty.CommandConfig) error {
 	cc, err := crosspty.NormalizeCommandConfig(cc)
 	if err != nil {
@@ -448,7 +466,7 @@ func TestNormalizeCommandConfig(t *testing.T) {
 	}
 
 	cfg := crosspty.CommandConfig{
-		Argv:      []string{"ping"},
+		Argv:      []string{mustFindTestCommand(t)},
 		EnvInject: map[string]string{"TERM": "xterm-256color"},
 	}
 
@@ -483,7 +501,7 @@ func TestNormalizeCommandConfig(t *testing.T) {
 
 func TestNormalizeCommandConfig_ExistingEnv(t *testing.T) {
 	cfg := crosspty.CommandConfig{
-		Argv: []string{"ping"},
+		Argv: []string{mustFindTestCommand(t)},
 		Env:  []string{"MYVAR=1", "TERM=custom"},
 	}
 	cfg, err := crosspty.NormalizeCommandConfig(cfg)
