@@ -13,15 +13,11 @@ func TestCreateStartupInfoEx_HideWindow(t *testing.T) {
 	t.Parallel()
 
 	p := &ptyWin{}
-	siEx, err := p.createStartupInfoEx(&syscall.SysProcAttr{HideWindow: true})
+	siEx, attrList, err := p.createStartupInfoEx(&syscall.SysProcAttr{HideWindow: true})
 	if err != nil {
 		t.Fatalf("createStartupInfoEx failed: %v", err)
 	}
-	t.Cleanup(func() {
-		if p.attrList != nil {
-			p.attrList.Delete()
-		}
-	})
+	defer attrList.Delete()
 
 	if siEx.Flags&windows.STARTF_USESHOWWINDOW == 0 {
 		t.Fatalf("expected STARTF_USESHOWWINDOW in flags, got %#x", siEx.Flags)

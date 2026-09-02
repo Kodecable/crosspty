@@ -23,10 +23,11 @@ func (p *ptyWin) createProcess(cc CommandConfig, sys *syscall.SysProcAttr) error
 		paused = true
 	}
 
-	siEx, err := p.createStartupInfoEx(sys)
+	siEx, attrList, err := p.createStartupInfoEx(sys)
 	if err != nil {
 		return err
 	}
+	defer attrList.Delete()
 
 	envBlock := createEnvBlock(dedupEnvCase(true, cc.Env))
 
@@ -133,7 +134,7 @@ func (p *ptyWin) processWaiter() {
 	}
 }
 
-func (p *ptyWin) createStartupInfoEx(sys *syscall.SysProcAttr) (*windows.StartupInfoEx, error) {
+func (p *ptyWin) createStartupInfoEx(sys *syscall.SysProcAttr) (*windows.StartupInfoEx, *windows.ProcThreadAttributeListContainer, error) {
 	siEx := new(windows.StartupInfoEx)
 	siEx.Flags = windows.STARTF_USESTDHANDLES
 
@@ -142,16 +143,14 @@ func (p *ptyWin) createStartupInfoEx(sys *syscall.SysProcAttr) (*windows.Startup
 		siEx.ShowWindow = syscall.SW_HIDE
 	}
 
-	var err error
-	p.attrList, err = p.createProcThreadAttList()
+	attrList, err := p.createProcThreadAttList()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	siEx.ProcThreadAttributeList = p.attrList.List()
-
+	siEx.ProcThreadAttributeList = attrList.List()
 	siEx.Cb = uint32(unsafe.Sizeof(*siEx))
 
-	return siEx, nil
+	return siEx, attrList, nil
 }
 
 // Copied from photostorm/pty (originally from the Go standard library).

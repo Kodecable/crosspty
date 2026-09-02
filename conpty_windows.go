@@ -74,9 +74,17 @@ func (p *ptyWin) createProcThreadAttList() (attrList *windows.ProcThreadAttribut
 	if err != nil {
 		return
 	}
+	if attrList == nil {
+		return nil, errors.New("NewProcThreadAttributeList returned a nil attribute list")
+	}
 
 	// (*(*unsafe.Pointer)(unsafe.Pointer(&p.conPty))) -> (unsafe.Pointer(uintptr(conpty)))
 	err = attrList.Update(windows.PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE, (*(*unsafe.Pointer)(unsafe.Pointer(&p.conPty))), uintptr(unsafe.Sizeof(p.conPty)))
+	if err != nil {
+		attrList.Delete()
+		return nil, err
+	}
+
 	return
 }
 

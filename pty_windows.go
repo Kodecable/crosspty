@@ -17,7 +17,6 @@ type ptyWin struct {
 	conPty    windows.Handle
 	readPipe  *os.File
 	writePipe *os.File
-	attrList  *windows.ProcThreadAttributeListContainer
 
 	closeCfg CloseConfig
 
@@ -86,7 +85,6 @@ func StartWithSysProcAttr(cc CommandConfig, sys *syscall.SysProcAttr) (Pty, erro
 		windows.ClosePseudoConsole(p.conPty)
 		p.readPipe.Close()
 		p.writePipe.Close()
-		p.attrList.Delete()
 		windows.CloseHandle(p.jobHandle)
 		return nil, err
 	}
@@ -141,7 +139,6 @@ func (p *ptyWin) killProcess() error {
 func (p *ptyWin) Close() (err error) {
 	p.closer.Do(func() {
 		err = p.killProcess()
-		p.attrList.Delete()
 		windows.CloseHandle(p.processHandle)
 		windows.ClosePseudoConsole(p.conPty)
 		p.readPipe.Close()
