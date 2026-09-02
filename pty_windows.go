@@ -44,6 +44,7 @@ func start(cc CommandConfig) (Pty, error) {
 // We behavior may differ from Go's std lib.
 // If Token != 0, the default value of CommandConfig.Env is obtained from
 // CreateEnvironmentBlock using the given Token with bInherit = false.
+// CREATE_SUSPENDED in CreationFlags is ignored; suspension is controlled by KillMode.
 func StartWithSysProcAttr(cc CommandConfig, sys *syscall.SysProcAttr) (Pty, error) {
 	if sys == nil {
 		sys = &syscall.SysProcAttr{}

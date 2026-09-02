@@ -379,6 +379,7 @@ type Pty interface {
 	//  - You do not have to call Wait() if you do not care about the exit code or process state.
 	//  - Thread-safe. Can be called multiple times from multiple goroutines.
 	//  - Returns the subprocess exit code (-1 means N/A, e.g., killed by signal).
+	//  - A failed Close() (e.g. ErrKillTimeout) does not necessarily stop the wait.
 	//
 	// For Windows:
 	//  - Wait() may also return -1 when the exit code could not be retrieved or the

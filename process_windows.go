@@ -17,6 +17,7 @@ func (p *ptyWin) createProcess(cc CommandConfig, sys *syscall.SysProcAttr) error
 
 	// Need EXTENDED_STARTUPINFO_PRESENT as we're making use of the attribute list field.
 	flags := sys.CreationFlags | uint32(windows.CREATE_UNICODE_ENVIRONMENT) | windows.EXTENDED_STARTUPINFO_PRESENT
+	flags = flags & (^uint32(windows.CREATE_SUSPENDED))
 	paused := false
 	if p.closeCfg.KillMode == KillModeKillGroupOnClose || p.closeCfg.KillMode == KillModeKillGroupOnSubProcessExit {
 		flags = flags | windows.CREATE_SUSPENDED
@@ -90,6 +91,7 @@ func (p *ptyWin) createProcess(cc CommandConfig, sys *syscall.SysProcAttr) error
 	err = makeConPTYAutoCloseOutputPipe(p.conPty)
 	if err != nil {
 		windows.TerminateProcess(p.processHandle, 0)
+		windows.CloseHandle(p.processHandle)
 		return err
 	}
 
@@ -97,6 +99,7 @@ func (p *ptyWin) createProcess(cc CommandConfig, sys *syscall.SysProcAttr) error
 		err = windows.AssignProcessToJobObject(p.jobHandle, p.processHandle)
 		if err != nil {
 			windows.TerminateProcess(p.processHandle, 0)
+			windows.CloseHandle(p.processHandle)
 			return err
 		}
 	}
@@ -105,6 +108,7 @@ func (p *ptyWin) createProcess(cc CommandConfig, sys *syscall.SysProcAttr) error
 		_, err = windows.ResumeThread(pi.Thread)
 		if err != nil {
 			windows.TerminateProcess(p.processHandle, 0)
+			windows.CloseHandle(p.processHandle)
 			return err
 		}
 	}
@@ -116,14 +120,14 @@ func (p *ptyWin) createProcess(cc CommandConfig, sys *syscall.SysProcAttr) error
 func (p *ptyWin) processWaiter() {
 	defer close(p.exitch)
 
-	event, err := windows.WaitForSingleObject(windows.Handle(p.processHandle), windows.INFINITE)
+	event, err := windows.WaitForSingleObject(p.processHandle, windows.INFINITE)
 	if err != nil || event != windows.WAIT_OBJECT_0 {
 		p.exitCode = -1
 		return
 	}
 
 	var exitCode uint32
-	err = windows.GetExitCodeProcess(windows.Handle(p.processHandle), &exitCode)
+	err = windows.GetExitCodeProcess(p.processHandle, &exitCode)
 	if err != nil {
 		p.exitCode = -1
 	} else {

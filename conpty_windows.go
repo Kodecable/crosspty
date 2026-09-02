@@ -109,6 +109,11 @@ func makeConPTYAutoCloseOutputPipe(conpty windows.Handle) error {
 		// > The call is not expected to fail unless the hPC argument is invalid
 		r0, _, _ := procReleasePseudoConsole.Call(uintptr(conpty))
 		if r0 != 0 { // HRESULT
+			// golang.org/x/sys@v0.41.0/windows/zsyscall_windows.go:1931 wraps
+			// HRESULT in this way.
+			// Upstream tracking:
+			// https://github.com/golang/go/issues/48736
+			// https://github.com/golang/go/issues/81249
 			return syscall.Errno(r0)
 		}
 		return nil
