@@ -4,6 +4,7 @@ package crosspty_test
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -276,6 +277,31 @@ func TestNormalizeCommandConfig_UnixExplicitPWDStopsAutoInject(t *testing.T) {
 	assertEnvEqualUnix(t, cfg.Env, []string{"PWD=/custom"})
 }
 
+func TestStartExecCmd_InvalidCloseConfig_Unix(t *testing.T) {
+	t.Parallel()
+
+	_, err := crosspty.StartExecCmd(exec.Command("sh"), crosspty.TermSize{}, crosspty.CloseConfig{
+		CloseTimeout: 2 * time.Second,
+		KillDelay:    2 * time.Second,
+	})
+	if !errors.Is(err, crosspty.ErrUnacceptableTimeout) {
+		t.Fatalf("expected ErrUnacceptableTimeout, got %v", err)
+	}
+}
+
+func TestStartExecCmd_StartFailure_Unix(t *testing.T) {
+	t.Parallel()
+
+	_, err := crosspty.StartExecCmd(
+		exec.Command("/nonexistent/crosspty-binary"),
+		crosspty.TermSize{},
+		crosspty.CloseConfig{},
+	)
+	if err == nil {
+		t.Fatal("expected error for nonexistent binary")
+	}
+}
+
 func TestKillModeKillSubProcess_Unix(t *testing.T) {
 	exe, err := os.Executable()
 	if err != nil {
@@ -306,6 +332,30 @@ func TestKillModeKillSubProcess_Unix(t *testing.T) {
 
 	if !waitForProcessState(childPID, true, 500*time.Millisecond) {
 		t.Fatalf("expected child %d to stay alive after Close() in KillSubProcess mode", childPID)
+	}
+}
+
+func TestKillModeKillGroupOnClose_AlreadyExited_Unix(t *testing.T) {
+	p, err := crosspty.Start(crosspty.CommandConfig{
+		Argv: []string{"true"},
+		CloseConfig: crosspty.CloseConfig{
+			CloseTimeout: 2 * time.Second,
+			KillDelay:    200 * time.Millisecond,
+			KillMode:     crosspty.KillModeKillGroupOnClose,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unable to start pty: %v", err)
+	}
+
+	if code := p.Wait(); code != 0 {
+		t.Fatalf("unexpected exit code: %d", code)
+	}
+
+	// The process group is already gone; Close() must treat the
+	// resulting ESRCH from the group signal as a clean exit.
+	if err := p.Close(); err != nil {
+		t.Fatalf("unable to close pty: %v", err)
 	}
 }
 

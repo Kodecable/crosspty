@@ -3,10 +3,12 @@ package crosspty_test
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"sort"
@@ -511,6 +513,12 @@ func TestApplyEnvFallbackAndInject(t *testing.T) {
 			inject:   nil,
 			want:     []string{"A=original"},
 		},
+		{
+			env:      []string{"A=original"},
+			fallback: map[string]string{"B": "fallback"},
+			inject:   map[string]string{"B": "injected"},
+			want:     []string{"A=original", "B=injected"},
+		},
 	}
 	for i, tt := range tests {
 		t.Run(fmt.Sprintf("ApplyEnvFallbackAndInject_%d", i), func(t *testing.T) {
@@ -583,6 +591,61 @@ func TestNormalizeCommandConfig_ExistingEnv(t *testing.T) {
 	}
 	if termCount != 1 {
 		t.Errorf("expected exactly 1 TERM variable, got %d", termCount)
+	}
+}
+
+func TestNormalizeCommandConfig_LookPathFailure(t *testing.T) {
+	t.Parallel()
+
+	_, err := crosspty.NormalizeCommandConfig(crosspty.CommandConfig{
+		Argv: []string{"crosspty-definitely-nonexistent-command"},
+	})
+	if err == nil {
+		t.Fatal("expected LookPath error for nonexistent command")
+	}
+}
+
+func TestNormalizeCommandConfig_RelativeArgv0WithSeparator(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cfg, err := crosspty.NormalizeCommandConfig(crosspty.CommandConfig{
+		Argv: []string{filepath.Join("bin", "prog")},
+		Dir:  dir,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := filepath.Join(dir, "bin", "prog")
+	if cfg.Argv[0] != want {
+		t.Fatalf("expected argv0 %q, got %q", want, cfg.Argv[0])
+	}
+}
+
+func TestNormalizeCommandConfig_UnacceptableCloseConfig(t *testing.T) {
+	t.Parallel()
+
+	_, err := crosspty.NormalizeCommandConfig(crosspty.CommandConfig{
+		Argv: []string{mustFindTestCommand(t)},
+		CloseConfig: crosspty.CloseConfig{
+			CloseTimeout: 2 * time.Second,
+			KillDelay:    2 * time.Second,
+		},
+	})
+	if !errors.Is(err, crosspty.ErrUnacceptableTimeout) {
+		t.Fatalf("expected ErrUnacceptableTimeout, got %v", err)
+	}
+}
+
+func TestOneshot_StartFailure(t *testing.T) {
+	t.Parallel()
+
+	_, err := crosspty.Oneshot(crosspty.CommandConfig{
+		Argv: []string{"crosspty-definitely-nonexistent-command"},
+	})
+	if err == nil {
+		t.Fatal("expected error for nonexistent command")
 	}
 }
 

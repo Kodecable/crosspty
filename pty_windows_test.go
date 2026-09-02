@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -328,6 +329,82 @@ func TestStartWithSysProcAttr_TokenUserSwitchIntegration(t *testing.T) {
 	}
 }
 
+func TestStartWithSysProcAttr_NilSysProcAttr_Windows(t *testing.T) {
+	p, err := crosspty.StartWithSysProcAttr(crosspty.CommandConfig{
+		Argv: []string{"cmd", "/c", "echo", "CROSSPTY_NIL_SYS_OK"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("StartWithSysProcAttr failed: %v", err)
+	}
+	defer p.Close()
+
+	out, err := io.ReadAll(testutils.NewANSIStripper(p))
+	if err != nil {
+		t.Fatalf("unable to read pty output: %v", err)
+	}
+	if exitCode := p.Wait(); exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d with output %q", exitCode, string(out))
+	}
+	if !strings.Contains(string(out), "CROSSPTY_NIL_SYS_OK") {
+		t.Fatalf("expected output to contain CROSSPTY_NIL_SYS_OK, got %q", string(out))
+	}
+}
+
+func TestStartWithSysProcAttr_InvalidTokenEnvFailure_Windows(t *testing.T) {
+	// Valid kernel handles are multiples of 4; an odd value is
+	// guaranteed to be an invalid handle, so CreateEnvironmentBlock
+	// must fail before anything is started.
+	_, err := crosspty.StartWithSysProcAttr(crosspty.CommandConfig{
+		Argv: []string{"cmd"},
+		// Env deliberately nil to force defaultEnvByToken.
+	}, &syscall.SysProcAttr{Token: syscall.Token(0xDEADBEEF)})
+	if err == nil {
+		t.Fatal("expected error for invalid token")
+	}
+}
+
+func TestStart_NonexistentBinary_Windows(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "crosspty-definitely-nonexistent-binary.exe")
+	_, err := crosspty.Start(crosspty.CommandConfig{
+		Argv: []string{bin},
+	})
+	if err == nil {
+		t.Fatal("expected error for nonexistent binary")
+	}
+}
+
+func TestStartWithSysProcAttr_CustomCmdLine_Windows(t *testing.T) {
+	// Resolve cmd.exe first so the test can build a custom command line
+	// from the normalized argv0.
+	cc, err := crosspty.NormalizeCommandConfig(crosspty.CommandConfig{
+		Argv: []string{"cmd", "/c", "echo", "CROSSPTY_ARGV_SHOULD_NOT_PRINT"},
+	})
+	if err != nil {
+		t.Fatalf("unable to normalize command config: %v", err)
+	}
+
+	cmdLine := `"` + cc.Argv[0] + `" /c echo CROSSPTY_CMDLINE_OK`
+	p, err := crosspty.StartWithSysProcAttr(cc, &syscall.SysProcAttr{CmdLine: cmdLine})
+	if err != nil {
+		t.Fatalf("StartWithSysProcAttr failed: %v", err)
+	}
+	defer p.Close()
+
+	out, err := io.ReadAll(testutils.NewANSIStripper(p))
+	if err != nil {
+		t.Fatalf("unable to read pty output: %v", err)
+	}
+	if exitCode := p.Wait(); exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d with output %q", exitCode, string(out))
+	}
+	if !strings.Contains(string(out), "CROSSPTY_CMDLINE_OK") {
+		t.Fatalf("expected output to contain CROSSPTY_CMDLINE_OK, got %q", string(out))
+	}
+	if strings.Contains(string(out), "CROSSPTY_ARGV_SHOULD_NOT_PRINT") {
+		t.Fatalf("expected custom CmdLine to replace argv-built command line, got %q", string(out))
+	}
+}
+
 func TestKillModeKillGroupOnClose_Windows(t *testing.T) {
 	exe, err := os.Executable()
 	if err != nil {
@@ -366,6 +443,74 @@ func TestKillModeKillGroupOnClose_Windows(t *testing.T) {
 
 	if !waitForProcessStateWindows(grandchildPID, false, 2*time.Second) {
 		t.Fatalf("expected grandchild %d to be killed after Close() in KillGroupOnClose mode", grandchildPID)
+	}
+}
+
+func TestKillModeKillSubProcess_Windows(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("unable to locate test executable: %v", err)
+	}
+
+	p, err := crosspty.Start(crosspty.CommandConfig{
+		Argv: []string{exe, "-test.run=TestHelperProcessWindows"},
+		EnvInject: map[string]string{
+			helperProcessEnvKeyWindows: "3",
+		},
+		CloseConfig: crosspty.CloseConfig{
+			CloseTimeout: 2 * time.Second,
+			KillDelay:    200 * time.Millisecond,
+			KillMode:     crosspty.KillModeKillSubProcess,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unable to start pty: %v", err)
+	}
+
+	// The helper loops forever; whether CTRL_CLOSE_EVENT or
+	// TerminateProcess finishes it, Close() must still succeed.
+	if err := p.Close(); err != nil {
+		t.Fatalf("unable to close pty: %v", err)
+	}
+	p.Wait()
+}
+
+func TestKillModeKillGroupOnSubProcessExit_Windows(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("unable to locate test executable: %v", err)
+	}
+
+	p, err := crosspty.Start(crosspty.CommandConfig{
+		Argv: []string{exe, "-test.run=TestHelperProcessWindows"},
+		EnvInject: map[string]string{
+			helperProcessEnvKeyWindows: "2",
+		},
+		CloseConfig: crosspty.CloseConfig{
+			CloseTimeout: 2 * time.Second,
+			KillDelay:    200 * time.Millisecond,
+			KillMode:     crosspty.KillModeKillGroupOnSubProcessExit,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unable to start pty: %v", err)
+	}
+
+	grandchildPID := readHelperPidWindows(t, p)
+	defer forceTerminateProcessWindows(grandchildPID)
+
+	if exitCode := p.Wait(); exitCode != 0 {
+		t.Fatalf("expected helper exit code 0, got %d", exitCode)
+	}
+
+	// In the default mode the job object is terminated by the process
+	// waiter as soon as the direct subprocess exits; no Close() needed.
+	if !waitForProcessStateWindows(grandchildPID, false, 2*time.Second) {
+		t.Fatalf("expected grandchild %d to be killed automatically after direct subprocess exit", grandchildPID)
+	}
+
+	if err := p.Close(); err != nil {
+		t.Fatalf("unable to close pty: %v", err)
 	}
 }
 
