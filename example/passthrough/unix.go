@@ -22,7 +22,7 @@ var (
 func setupTerm() (err error) {
 	origStdinState, err = term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
-		return fmt.Errorf("unable to make stdin raw: %v\n", err)
+		return fmt.Errorf("unable to make stdin raw: %v", err)
 	}
 	return nil
 }

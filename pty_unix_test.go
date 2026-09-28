@@ -225,7 +225,7 @@ func TestApplyEnvFallbackAndInject_UnixDeleteIsCaseSensitive(t *testing.T) {
 	assertEnvEqualUnix(t, got, []string{"Path=original"})
 }
 
-func TestNormalizeCommandConfig_UnixPWDCaseSensitive(t *testing.T) {
+func TestNormalizeCommandConfig_UnixENVCaseSensitive(t *testing.T) {
 	t.Parallel()
 
 	exe, err := os.Executable()
@@ -233,9 +233,29 @@ func TestNormalizeCommandConfig_UnixPWDCaseSensitive(t *testing.T) {
 		t.Fatalf("unable to locate test executable: %v", err)
 	}
 
-	wd, err := os.Getwd()
+	cfg, err := crosspty.NormalizeCommandConfig(crosspty.CommandConfig{
+		Argv:        []string{exe},
+		Dir:         "workdir",
+		Env:         []string{"AAA=ShouldNotBeReplace"},
+		EnvFallback: map[string]string{},
+		EnvInject:   map[string]string{"aaa": "manual", "PWD": ""},
+	})
 	if err != nil {
-		t.Fatalf("unable to get working directory: %v", err)
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	assertEnvEqualUnix(t, cfg.Env, []string{
+		"aaa=manual",
+		"AAA=ShouldNotBeReplace",
+	})
+}
+
+func TestNormalizeCommandConfig_EnvEmpty(t *testing.T) {
+	t.Parallel()
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("unable to locate test executable: %v", err)
 	}
 
 	cfg, err := crosspty.NormalizeCommandConfig(crosspty.CommandConfig{
@@ -243,16 +263,13 @@ func TestNormalizeCommandConfig_UnixPWDCaseSensitive(t *testing.T) {
 		Dir:         "workdir",
 		Env:         []string{},
 		EnvFallback: map[string]string{},
-		EnvInject:   map[string]string{"pwd": "manual"},
+		EnvInject:   map[string]string{},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	assertEnvEqualUnix(t, cfg.Env, []string{
-		"pwd=manual",
-		"PWD=" + filepath.Join(wd, "workdir"),
-	})
+	assertEnvEqualUnix(t, cfg.Env, []string{})
 }
 
 func TestNormalizeCommandConfig_UnixExplicitPWDStopsAutoInject(t *testing.T) {
@@ -275,6 +292,34 @@ func TestNormalizeCommandConfig_UnixExplicitPWDStopsAutoInject(t *testing.T) {
 	}
 
 	assertEnvEqualUnix(t, cfg.Env, []string{"PWD=/custom"})
+}
+
+func TestNormalizeCommandConfig_UnixAutoInjectPWD(t *testing.T) {
+	t.Parallel()
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("unable to locate test executable: %v", err)
+	}
+
+	cfg, err := crosspty.NormalizeCommandConfig(crosspty.CommandConfig{
+		Argv:        []string{exe},
+		Dir:         "workdir",
+		Env:         []string{},
+		EnvFallback: map[string]string{},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("unable to get working directory: %v", err)
+	}
+
+	assertEnvEqualUnix(t, cfg.Env, []string{
+		"PWD=" + filepath.Join(wd, "workdir"),
+	})
 }
 
 func TestStartExecCmd_InvalidCloseConfig_Unix(t *testing.T) {

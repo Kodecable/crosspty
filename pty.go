@@ -27,6 +27,7 @@ package crosspty
 import (
 	"errors"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -227,105 +228,122 @@ func ApplyEnvFallbackAndInject(Env []string, Fallback, Inject map[string]string)
 	return New
 }
 
-// NormalizeCommandConfig is safe to call repeatedly with the same value.
-func NormalizeCommandConfig(cc_ CommandConfig) (cc CommandConfig, err error) {
-	cc = cc_
+// NormalizeCommandConfig is safe to call repeatedly with the same value. The
+// input is not modified.
+func NormalizeCommandConfig(rawCmdCfg CommandConfig) (cmdCfg CommandConfig, err error) {
+	cmdCfg = CommandConfig{}
 	wd, err := os.Getwd()
 	if err != nil {
-		return cc, err
+		return rawCmdCfg, err
 	}
 	osenv := os.Environ()
 
-	if len(cc.Argv) < 1 {
-		return cc, errors.New("command arg need argv")
+	if len(rawCmdCfg.Argv) < 1 {
+		return rawCmdCfg, errors.New("command arg need argv")
+	} else {
+		cmdCfg.Argv = make([]string, len(rawCmdCfg.Argv))
+		copy(cmdCfg.Argv, rawCmdCfg.Argv)
 	}
 
-	if cc.Dir == "" {
-		cc.Dir = wd
+	cmdCfg.Dir = rawCmdCfg.Dir
+	if cmdCfg.Dir == "" {
+		cmdCfg.Dir = wd
 	}
 
-	if !filepath.IsAbs(cc.Dir) {
-		cc.Dir = filepath.Join(wd, cc.Dir)
+	if !filepath.IsAbs(cmdCfg.Dir) {
+		cmdCfg.Dir = filepath.Join(wd, cmdCfg.Dir)
 	}
 
-	if filepath.Base(cc.Argv[0]) == cc.Argv[0] {
-		cc.Argv[0], err = exec.LookPath(cc.Argv[0])
+	if filepath.Base(cmdCfg.Argv[0]) == cmdCfg.Argv[0] {
+		cmdCfg.Argv[0], err = exec.LookPath(cmdCfg.Argv[0])
 		if err != nil {
-			return cc, err
+			return cmdCfg, err
 		}
 	}
 
-	if !filepath.IsAbs(cc.Argv[0]) {
-		cc.Argv[0] = filepath.Join(cc.Dir, cc.Argv[0])
+	if !filepath.IsAbs(cmdCfg.Argv[0]) {
+		cmdCfg.Argv[0] = filepath.Join(cmdCfg.Dir, cmdCfg.Argv[0])
 	}
 
-	if cc.Env == nil {
-		cc.Env = osenv
+	if rawCmdCfg.Env != nil {
+		cmdCfg.Env = make([]string, len(rawCmdCfg.Env))
+		copy(cmdCfg.Env, rawCmdCfg.Env)
+	} else {
+		cmdCfg.Env = osenv
 	}
 
-	if cc.EnvFallback == nil {
-		cc.EnvFallback = map[string]string{"TERM": "vt100"}
+	if rawCmdCfg.EnvFallback != nil {
+		cmdCfg.EnvFallback = make(map[string]string, len(rawCmdCfg.EnvFallback))
+		maps.Copy(cmdCfg.EnvFallback, rawCmdCfg.EnvFallback)
+	} else {
+		cmdCfg.EnvFallback = map[string]string{"TERM": "vt100"}
 		if runtime.GOOS == "windows" {
 			for _, s := range osenv {
 				if k, v, _ := strings.Cut(s, "="); strings.EqualFold(k, "SYSTEMROOT") {
-					cc.EnvFallback[k] = v
+					cmdCfg.EnvFallback[k] = v
 				}
 			}
 		}
 	}
 
-	if !(cc.EnvInject != nil && len(cc.EnvInject) == 0) {
-		if cc.EnvInject == nil {
-			cc.EnvInject = map[string]string{}
+	if rawCmdCfg.EnvInject != nil {
+		cmdCfg.EnvInject = make(map[string]string, len(rawCmdCfg.EnvInject))
+		maps.Copy(cmdCfg.EnvInject, rawCmdCfg.EnvInject)
+	}
+
+	if !(cmdCfg.EnvInject != nil && len(cmdCfg.EnvInject) == 0) {
+		if cmdCfg.EnvInject == nil {
+			cmdCfg.EnvInject = map[string]string{}
 		}
 
 		hasPWD := false
 		if runtime.GOOS == "windows" {
-			for k := range cc.EnvInject {
+			for k := range cmdCfg.EnvInject {
 				if strings.EqualFold(k, "PWD") {
 					hasPWD = true
 					break
 				}
 			}
 		} else {
-			_, hasPWD = cc.EnvInject["PWD"]
+			_, hasPWD = cmdCfg.EnvInject["PWD"]
 		}
 
 		if !hasPWD {
-			cc.EnvInject["PWD"] = cc.Dir
+			cmdCfg.EnvInject["PWD"] = cmdCfg.Dir
 		}
 	}
 
-	cc.Env = ApplyEnvFallbackAndInject(cc.Env, cc.EnvFallback, cc.EnvInject)
+	cmdCfg.Env = ApplyEnvFallbackAndInject(cmdCfg.Env, cmdCfg.EnvFallback, cmdCfg.EnvInject)
 
-	if cc.Size.Cols == 0 || cc.Size.Rows == 0 {
-		cc.Size = TermSize{
+	cmdCfg.Size = rawCmdCfg.Size
+	if cmdCfg.Size.Cols == 0 || cmdCfg.Size.Rows == 0 {
+		cmdCfg.Size = TermSize{
 			Rows: 24,
 			Cols: 80,
 		}
 	}
 
-	cc.CloseConfig, err = normalizeCloseConfig(cc.CloseConfig)
-	return cc, err
+	cmdCfg.CloseConfig, err = normalizeCloseConfig(rawCmdCfg.CloseConfig)
+	return cmdCfg, err
 }
 
-func normalizeCloseConfig(cc_ CloseConfig) (CloseConfig, error) {
-	cc := cc_
+func normalizeCloseConfig(rawCloseCfg CloseConfig) (CloseConfig, error) {
+	closeCfg := rawCloseCfg
 
-	if cc.CloseTimeout == 0 && cc.KillDelay == 0 {
-		cc.CloseTimeout = 10 * time.Second
-		cc.KillDelay = 5 * time.Second
+	if closeCfg.CloseTimeout == 0 && closeCfg.KillDelay == 0 {
+		closeCfg.CloseTimeout = 10 * time.Second
+		closeCfg.KillDelay = 5 * time.Second
 	}
 
-	if cc.CloseTimeout-cc.KillDelay < 1*time.Second {
-		return cc, ErrUnacceptableTimeout
+	if closeCfg.CloseTimeout-closeCfg.KillDelay < 1*time.Second {
+		return closeCfg, ErrUnacceptableTimeout
 	}
 
-	if cc.KillSignal == 0 {
-		cc.KillSignal = syscall.SIGKILL
+	if closeCfg.KillSignal == 0 {
+		closeCfg.KillSignal = syscall.SIGKILL
 	}
 
-	return cc, nil
+	return closeCfg, nil
 }
 
 // Pty represents a pseudo-terminal session.

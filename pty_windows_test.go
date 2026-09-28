@@ -587,3 +587,29 @@ func TestNormalizeCommandConfig_WindowsEmptyEnvInjectDisablesPWD(t *testing.T) {
 		t.Fatalf("expected no PWD entry, got %v", got)
 	}
 }
+
+func TestNormalizeCommandConfig_WindowsAutoInjectPWD(t *testing.T) {
+	t.Parallel()
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("unable to locate test executable: %v", err)
+	}
+
+	cfg, err := crosspty.NormalizeCommandConfig(crosspty.CommandConfig{
+		Argv:        []string{exe},
+		Dir:         "workdir",
+		Env:         []string{},
+		EnvFallback: map[string]string{},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("unable to get working directory: %v", err)
+	}
+
+	assertEnvEqualWindows(t, cfg.Env, []string{"PWD=" + filepath.Join(wd, "workdir")})
+}
