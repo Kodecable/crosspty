@@ -88,6 +88,7 @@ jobs:
           force-9p: ${{ matrix.force-9p }}
           disable-kvm: true
           qemu-opts: -cpu qemu64
+          run-timeout: 900
           kconfig: ${{ matrix.kconfig }}
           cc: ${{ steps.kernel-compiler.outputs.cc }}
           hostcc: ${{ steps.kernel-compiler.outputs.hostcc }}
@@ -105,6 +106,141 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  # Diagnostics for the Linux 4.4 guest hanging right after "Booting the
+  # kernel." (first seen after the noble QEMU 1:8.2.2+ds-0ubuntu1.18 update).
+  # A/B boots the same cached kernel on the current QEMU and on 1.17, and
+  # samples the guest RIP over the gdbstub while it is stuck.
+  linux-4-4-diag:
+    name: linux 4.4.302 diag (qemu ${{ matrix.qemu }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        qemu:
+          - current
+          - 8.2.2+ds-0ubuntu1.17
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install pinned QEMU
+        if: matrix.qemu != 'current'
+        shell: bash
+        run: |
+          set -eu
+          cd "$RUNNER_TEMP"
+          for pkg in qemu-system-x86_${{ matrix.qemu }}_amd64 qemu-system-common_${{ matrix.qemu }}_amd64 qemu-system-data_${{ matrix.qemu }}_all; do
+            curl -fsSLO "https://launchpad.net/ubuntu/+archive/primary/+files/$pkg.deb"
+          done
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends --allow-downgrades ./qemu-system-*.deb
+          sudo apt-mark hold qemu-system-x86 qemu-system-common qemu-system-data
+
+      - name: Install gdb
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends gdb
+
+      - name: Start RIP sampler
+        shell: bash
+        run: |
+          set -eu
+          out="$RUNNER_TEMP/rip-samples.txt"
+          echo "RIP_SAMPLES=$out" >> "$GITHUB_ENV"
+          nohup bash -c '
+            for _ in $(seq 1 120); do
+              ss -ltn | grep -q ":1234 " && break
+              sleep 5
+            done
+            sleep 120
+            for n in 1 2 3 4 5; do
+              echo "=== sample $n $(date -u +%T)"
+              timeout 30 gdb -q -batch -nx \
+                -ex "set architecture i386:x86-64" \
+                -ex "target remote :1234" \
+                -ex "info registers rip" -ex "info registers rsp" \
+                -ex "info registers eflags" -ex "info registers cs" \
+                -ex "info registers cr0" -ex "info registers cr3" \
+                -ex "info registers cr4" -ex "info registers efer" \
+                -ex "x/6i \$pc" \
+                -ex "detach" 2>&1
+              sleep 10
+            done
+          ' > "$out" 2>&1 &
+
+      - name: Boot Linux 4.4.302 VM
+        id: boot
+        continue-on-error: true
+        uses: Kodecable/fork-vng-action@f03d101895186f2d35879fe3dda946aaa89da211
+        with:
+          name: crosspty-linux-4.4.302
+          kernel-url: https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git
+          kernel-tag: v4.4.302
+          version: v4.4-gcc-gnu89-hostcc-no-stack-9p
+          force-9p: true
+          disable-kvm: true
+          qemu-opts: -cpu qemu64 -no-reboot -gdb tcp::1234 -d cpu_reset,guest_errors,unimp -D ${{ runner.temp }}/qemu-debug.log
+          append: mitigations=off earlyprintk=serial,ttyS0,115200,keep ignore_loglevel
+          run-timeout: 360
+          kconfig: .github/kconfigs/legacy-kernel.config
+          vmlinux-h: false
+          run: |
+            set -eu
+            uname -a
+
+      - name: Report
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          echo "::group::Host toolchain and QEMU"
+          dpkg-query -W qemu-system-x86 qemu-system-common qemu-system-data seabios binutils gcc-13
+          qemu-system-x86_64 --version
+          pipx list --short 2>/dev/null
+          echo "::endgroup::"
+
+          echo "::group::Kernel image"
+          ls -la linux linux/arch/x86/boot
+          sha256sum linux/arch/x86/boot/bzImage linux/.config
+          grep -E '^CONFIG_(RELOCATABLE|RANDOMIZE_BASE|PHYSICAL_START|SMP|X86_5LEVEL|PARAVIRT|DEBUG_INFO)=' linux/.config
+          echo "::endgroup::"
+
+          echo "::group::QEMU debug log (tail)"
+          sudo tail -n 200 "$RUNNER_TEMP/qemu-debug.log"
+          echo "::endgroup::"
+
+          echo "::group::RIP samples"
+          cat "$RIP_SAMPLES"
+          echo "::endgroup::"
+
+          echo "::group::RIP -> System.map"
+          grep -oE 'rip +0x[0-9a-f]+' "$RIP_SAMPLES" | awk '{print $2}' | sort -u | while read -r rip; do
+            python3 - "$rip" linux/System.map <<'EOF'
+          import sys
+          rip = int(sys.argv[1], 16)
+          # Before the switch to kernel virtual addresses RIP is physical.
+          if rip < 0xffffffff00000000:
+              rip += 0xffffffff80000000
+          best = None
+          for line in open(sys.argv[2]):
+              addr, _, sym = line.split()
+              addr = int(addr, 16)
+              if addr <= rip and (best is None or addr > best[0]):
+                  best = (addr, sym)
+          if best:
+              print(f"{sys.argv[1]} -> {best[1]}+{rip - best[0]:#x}")
+          else:
+              print(f"{sys.argv[1]} -> ?")
+          EOF
+          done
+          echo "::endgroup::"
+
+          echo "boot outcome: ${{ steps.boot.outcome }}"
 
   go-test-windows:
     name: ${{ matrix.os }}
