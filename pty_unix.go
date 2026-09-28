@@ -80,16 +80,11 @@ func StartExecCmd(cmd *exec.Cmd, sz TermSize, closeConfig CloseConfig) (Pty, err
 	return p, nil
 }
 
-func (p *ptyUnix) signalUnix(_ bool, signal syscall.Signal) error {
+func (p *ptyUnix) signalUnix(group bool, signal syscall.Signal) error {
 	pid := p.cmd.Process.Pid
-	// if group {
-	// 	if pid > 1 {
-	// 		// We dont want to kill everyone.
-	// 		// However, this may still happen in some Docker or namespace setups.
-	// 		// This may be overly conservative.
-	// 		pid = -pid
-	// 	}
-	// }
+	if group {
+		pid = -pid
+	}
 	return syscall.Kill(pid, signal)
 }
 
