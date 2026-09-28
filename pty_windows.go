@@ -21,7 +21,8 @@ type ptyWin struct {
 	closeCfg CloseConfig
 
 	exitCode int
-	exitch   chan any
+	exitch   chan struct{}
+	cleanch  chan struct{}
 	closer   sync.Once
 
 	processId     uint32
@@ -64,7 +65,8 @@ func StartWithSysProcAttr(cc CommandConfig, sys *syscall.SysProcAttr) (Pty, erro
 	}
 
 	p := &ptyWin{
-		exitch:   make(chan any),
+		exitch:   make(chan struct{}),
+		cleanch:  make(chan struct{}),
 		closeCfg: cc.CloseConfig,
 	}
 
@@ -140,10 +142,10 @@ func (p *ptyWin) killProcess() error {
 func (p *ptyWin) Close() (err error) {
 	p.closer.Do(func() {
 		err = p.killProcess()
-		windows.CloseHandle(p.processHandle)
-		windows.ClosePseudoConsole(p.conPty)
 		p.readPipe.Close()
-		windows.CloseHandle(p.jobHandle)
+		// clean handle in processWaiter since it may still using it when
+		// ErrKillTimeout.
+		close(p.cleanch)
 	})
 	return
 }

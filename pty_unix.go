@@ -20,7 +20,7 @@ type ptyUnix struct {
 	pidFD int
 
 	exitCode int
-	exitch   chan any
+	exitch   chan struct{}
 	closer   sync.Once
 
 	closeCfg CloseConfig
@@ -54,7 +54,7 @@ func StartExecCmd(cmd *exec.Cmd, sz TermSize, closeConfig CloseConfig) (Pty, err
 
 	p := &ptyUnix{
 		cmd:      cmd,
-		exitch:   make(chan any),
+		exitch:   make(chan struct{}),
 		closeCfg: closeCfg,
 	}
 	p.setSysProcAttr(cmd)

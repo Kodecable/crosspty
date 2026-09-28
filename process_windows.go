@@ -118,19 +118,23 @@ func (p *ptyWin) createProcess(cc CommandConfig, sys *syscall.SysProcAttr) error
 }
 
 func (p *ptyWin) processWaiter() {
-	defer close(p.exitch)
+	p.exitCode = -1
+	defer func() {
+		close(p.exitch)
+		<-p.cleanch
+		windows.CloseHandle(p.processHandle)
+		windows.ClosePseudoConsole(p.conPty)
+		windows.CloseHandle(p.jobHandle)
+	}()
 
 	event, err := windows.WaitForSingleObject(p.processHandle, windows.INFINITE)
 	if err != nil || event != windows.WAIT_OBJECT_0 {
-		p.exitCode = -1
 		return
 	}
 
 	var exitCode uint32
 	err = windows.GetExitCodeProcess(p.processHandle, &exitCode)
-	if err != nil {
-		p.exitCode = -1
-	} else {
+	if err == nil {
 		p.exitCode = int(exitCode)
 		if p.closeCfg.KillMode == KillModeKillGroupOnSubProcessExit {
 			windows.TerminateJobObject(p.jobHandle, p.closeCfg.KillExitCode)
