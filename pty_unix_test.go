@@ -450,3 +450,42 @@ func testTermSignalGroupUnix(t *testing.T, termSignalGroup bool, wantChildAlive 
 		t.Fatalf("expected child %d to exit when TermSignalGroup is true", childPID)
 	}
 }
+
+func TestCloseIdempotentError_Unix(t *testing.T) {
+	p, err := crosspty.Start(crosspty.CommandConfig{
+		Argv: []string{"sh", "-c", "trap '' HUP; echo ready; while :; do sleep 0.1; done"},
+		Env:  []string{},
+		CloseConfig: crosspty.CloseConfig{
+			CloseTimeout: 2 * time.Second,
+			KillDelay:    100 * time.Millisecond,
+			// An invalid signal makes the kill signal fail, exercising
+			// the Close() error path.
+			KillSignal: syscall.Signal(999),
+		},
+	})
+	if err != nil {
+		t.Fatalf("unable to start pty: %v", err)
+	}
+	defer syscall.Kill(p.Pid(), syscall.SIGKILL)
+
+	// Wait until the trap is installed so the SIGHUP from Close() closing
+	// the PTY FD cannot kill the subprocess before the kill signal stage.
+	line, err := bufio.NewReader(testutils.NewANSIStripper(p)).ReadString('\n')
+	if err != nil {
+		t.Fatalf("unable to read pty: %v", err)
+	}
+	if got := trimCmdOutput(line); got != "ready" {
+		t.Fatalf("expected 'ready', got: %q", got)
+	}
+
+	err1 := p.Close()
+	if err1 == nil {
+		t.Fatal("expected non-nil error from Close() with an invalid KillSignal")
+	}
+
+	// Close() is idempotent: repeated calls must return the same error
+	// instead of dropping it.
+	if err2 := p.Close(); err2 != err1 {
+		t.Fatalf("Close() is not idempotent: got %v then %v", err1, err2)
+	}
+}

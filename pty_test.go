@@ -3,6 +3,7 @@ package crosspty_test
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -259,6 +260,13 @@ func TestHelperProcess(t *testing.T) {
 			os.Exit(1)
 		}
 		os.Exit(0)
+	}
+	if os.Getenv("GO_WANT_HELPER_PROCESS") == "6" {
+		writeHelperProtocolLine("READY", "loop")
+		for i := 0; ; i++ {
+			fmt.Printf("line %d\n", i)
+			time.Sleep(100 * time.Millisecond)
+		}
 	}
 }
 
@@ -676,4 +684,91 @@ func TestWriteAfterProcessDead(t *testing.T) {
 	_, _ = p.Write([]byte("hello"))
 
 	// not panic, pass
+}
+
+// helperLoopCommand returns a config for the TestHelperProcess mode 6
+// helper, which writes a READY line and then keeps outputting until it is
+// killed.
+func helperLoopCommand(t *testing.T) crosspty.CommandConfig {
+	t.Helper()
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal("unable to locate exe:", err)
+	}
+
+	return crosspty.CommandConfig{
+		Argv: []string{exe, "-test.run=TestHelperProcess"},
+		EnvInject: map[string]string{
+			"GO_WANT_HELPER_PROCESS": "6",
+		},
+	}
+}
+
+func TestStartContext_CancelInterruptsRead(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	p, err := crosspty.StartWithContext(ctx, helperLoopCommand(t))
+	if err != nil {
+		t.Fatalf("unable to start pty: %v", err)
+	}
+	defer p.Close()
+
+	if payload := readHelperProtocolLine(t, bufio.NewReader(testutils.NewANSIStripper(p)), "READY"); payload != "loop" {
+		t.Fatalf("unexpected helper READY payload: %q", payload)
+	}
+
+	readErr := make(chan error, 1)
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			if _, err := p.Read(buf); err != nil {
+				readErr <- err
+				return
+			}
+		}
+	}()
+
+	cancel()
+
+	select {
+	case err := <-readErr:
+		t.Logf("read interrupted with: %v", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("Read() was not interrupted after context cancel")
+	}
+
+	waitDone := make(chan int, 1)
+	go func() { waitDone <- p.Wait() }()
+	select {
+	case code := <-waitDone:
+		t.Logf("exit code after cancel: %d", code)
+	case <-time.After(10 * time.Second):
+		t.Fatal("Wait() did not return after context cancel")
+	}
+}
+
+func TestOneshotContext_Cancel(t *testing.T) {
+	type result struct {
+		buf []byte
+		err error
+	}
+	done := make(chan result, 1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	go func() {
+		buf, err := crosspty.OneshotWithContext(ctx, helperLoopCommand(t))
+		done <- result{buf, err}
+	}()
+
+	select {
+	case res := <-done:
+		t.Logf("OneshotContext returned after %v (err: %v, %d bytes)", time.Since(start), res.err, len(res.buf))
+	case <-time.After(15 * time.Second):
+		t.Fatal("OneshotContext did not return after context deadline")
+	}
 }

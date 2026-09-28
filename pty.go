@@ -25,6 +25,7 @@
 package crosspty
 
 import (
+	"context"
 	"errors"
 	"io"
 	"maps"
@@ -385,14 +386,16 @@ type Pty interface {
 	// Will attempt graceful termination first (SIGHUP, CTRL_CLOSE_EVENT, or
 	// TermSignal).
 	// Close() will not wait for Read/Write to finish; it may interrupt ongoing r/w.
-	// Thread-safe. Can be called multiple times.
+	// It is idempotent (return the same error). will exit immediately if a previous
+	// Wait() has already exited.
+	// Thread-safe. Can be called multiple times from multiple goroutines.
 	Close() error
 
 	// Wait for the child process to exit and return its exit code.
 	//  - If you do not read, the process may not exit (buffer full).
 	//  - A successful Close() will stop the wait.
 	//  - Wait() will exit immediately if a previous Wait() has already exited.
-	//  - It is idempotent and will return the same exit code.
+	//  - It is idempotent (return the same exit code).
 	//  - You still need to call Close() after Wait() to free resources.
 	//  - You do not have to call Wait() if you do not care about the exit code or process state.
 	//  - Thread-safe. Can be called multiple times from multiple goroutines.
@@ -423,8 +426,21 @@ func Start(cc CommandConfig) (Pty, error) {
 	// Experimental TODO: runtime.AddCleanup?
 }
 
+// A simple helper that auto call Close() after context done. Read() and
+// Write() may be interruptted by context done. You MUST NOT call Read(),
+// Write(), Resize() after context done.
+func StartWithContext(ctx context.Context, cc CommandConfig) (Pty, error) {
+	pty, err := Start(cc)
+	if err == nil {
+		context.AfterFunc(ctx, func() {
+			pty.Close()
+		})
+	}
+
+	return pty, err
+}
+
 // A simple helper that runs the command once and collects all output.
-// Note: Close errors are ignored.
 func Oneshot(cc CommandConfig) (buf []byte, err error) {
 	ptmx, err := Start(cc)
 	if err != nil {
@@ -434,4 +450,20 @@ func Oneshot(cc CommandConfig) (buf []byte, err error) {
 
 	buf, err = io.ReadAll(ptmx)
 	return
+}
+
+// See StartWithContext() and Oneshot().
+func OneshotWithContext(ctx context.Context, cc CommandConfig) (buf []byte, err error) {
+	ptmx, err := Start(cc)
+	if err != nil {
+		return nil, err
+	}
+	defer ptmx.Close()
+
+	stop := context.AfterFunc(ctx, func() {
+		ptmx.Close()
+	})
+	defer stop()
+
+	return io.ReadAll(ptmx)
 }

@@ -20,8 +20,10 @@ type ptyUnix struct {
 	pidFD int
 
 	exitCode int
-	exitch   chan struct{}
-	closer   sync.Once
+	closeErr error
+
+	exitch chan struct{}
+	closer sync.Once
 
 	closeCfg CloseConfig
 }
@@ -91,7 +93,7 @@ func (p *ptyUnix) signalUnix(_ bool, signal syscall.Signal) error {
 	return syscall.Kill(pid, signal)
 }
 
-func (p *ptyUnix) Close() (err error) {
+func (p *ptyUnix) Close() error {
 	p.closer.Do(func() {
 		defer closePidFD(p.pidFD)
 		if p.closeCfg.TermSignal == 0 {
@@ -110,14 +112,15 @@ func (p *ptyUnix) Close() (err error) {
 			}
 		}
 
-		err = p.signal(p.closeCfg.KillMode != KillModeKillSubProcess, p.closeCfg.KillSignal)
+		err := p.signal(p.closeCfg.KillMode != KillModeKillSubProcess, p.closeCfg.KillSignal)
 		if err != nil {
 			if errors.Is(err, syscall.ESRCH) {
 				// It's dead, ok
-				err = nil
+				p.closeErr = nil
 				return
 			}
 			if !errors.Is(err, syscall.EPERM) {
+				p.closeErr = err
 				return
 			}
 			// EPERM? maybe the pid was recycled or a true EPERM
@@ -129,16 +132,17 @@ func (p *ptyUnix) Close() (err error) {
 			if errors.Is(err, syscall.EPERM) {
 				// Damm, it's true EPERM
 				// Maybe sudo or SELinux? Whatever, can't handle, tell user
+				p.closeErr = err
 				return
 			}
-			err = ErrKillTimeout
+			p.closeErr = ErrKillTimeout
 			return
 		case <-p.exitch:
-			err = nil
+			p.closeErr = nil
 			return
 		}
 	})
-	return
+	return p.closeErr
 }
 
 func (p *ptyUnix) Write(d []byte) (n int, err error) {

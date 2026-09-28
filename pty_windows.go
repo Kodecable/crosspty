@@ -21,9 +21,11 @@ type ptyWin struct {
 	closeCfg CloseConfig
 
 	exitCode int
-	exitch   chan struct{}
-	cleanch  chan struct{}
-	closer   sync.Once
+	closeErr error
+
+	exitch  chan struct{}
+	cleanch chan struct{}
+	closer  sync.Once
 
 	processId     uint32
 	processHandle windows.Handle
@@ -139,15 +141,15 @@ func (p *ptyWin) killProcess() error {
 	}
 }
 
-func (p *ptyWin) Close() (err error) {
+func (p *ptyWin) Close() error {
 	p.closer.Do(func() {
-		err = p.killProcess()
+		p.closeErr = p.killProcess()
 		p.readPipe.Close()
 		// clean handle in processWaiter since it may still using it when
 		// ErrKillTimeout.
 		close(p.cleanch)
 	})
-	return
+	return p.closeErr
 }
 
 func (p *ptyWin) Wait() int {
