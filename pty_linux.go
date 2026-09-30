@@ -35,12 +35,12 @@ func (p *ptyUnix) signal(group bool, signal syscall.Signal) (err error) {
 	const PIDFD_SIGNAL_PROCESS_GROUP = 4 // (since linux 6.9)
 
 	if p.pidFD == -1 {
-		return p.signalUnix(group, signal)
+		return p.syscallKill(group, signal)
 	} else {
 		if group {
 			err = unix.PidfdSendSignal(p.pidFD, signal, nil, PIDFD_SIGNAL_PROCESS_GROUP)
 			if errors.Is(err, syscall.EINVAL) {
-				return p.signalUnix(group, signal)
+				return p.syscallKill(group, signal)
 			}
 			return err
 		} else {
@@ -49,8 +49,9 @@ func (p *ptyUnix) signal(group bool, signal syscall.Signal) (err error) {
 	}
 }
 
-func closePidFD(pidFd int) {
-	if pidFd != -1 {
-		syscall.Close(pidFd)
+func (p *ptyUnix) closePidFD() {
+	if p.pidFD != -1 {
+		syscall.Close(p.pidFD)
+		p.pidFD = -1
 	}
 }

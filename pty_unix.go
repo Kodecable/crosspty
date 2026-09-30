@@ -22,8 +22,9 @@ type ptyUnix struct {
 	exitCode int
 	closeErr error
 
-	exitch chan struct{}
-	closer sync.Once
+	exitch  chan struct{}
+	cleanch chan struct{}
+	closer  sync.Once
 
 	closeCfg CloseConfig
 }
@@ -57,6 +58,7 @@ func StartExecCmd(cmd *exec.Cmd, sz TermSize, closeConfig CloseConfig) (Pty, err
 	p := &ptyUnix{
 		cmd:      cmd,
 		exitch:   make(chan struct{}),
+		cleanch:  make(chan struct{}),
 		closeCfg: closeCfg,
 	}
 	p.setSysProcAttr(cmd)
@@ -75,12 +77,14 @@ func StartExecCmd(cmd *exec.Cmd, sz TermSize, closeConfig CloseConfig) (Pty, err
 			p.signal(true, p.closeCfg.KillSignal)
 		}
 		close(p.exitch)
+		<-p.cleanch
+		p.closePidFD()
 	}()
 
 	return p, nil
 }
 
-func (p *ptyUnix) signalUnix(group bool, signal syscall.Signal) error {
+func (p *ptyUnix) syscallKill(group bool, signal syscall.Signal) error {
 	pid := p.cmd.Process.Pid
 	if group {
 		pid = -pid
@@ -90,7 +94,8 @@ func (p *ptyUnix) signalUnix(group bool, signal syscall.Signal) error {
 
 func (p *ptyUnix) Close() error {
 	p.closer.Do(func() {
-		defer closePidFD(p.pidFD)
+		defer close(p.cleanch)
+
 		if p.closeCfg.TermSignal == 0 {
 			p.file.Close() // trigger SIGHUP
 		} else {

@@ -12,8 +12,8 @@ func (p *ptyUnix) setSysProcAttr(_ *exec.Cmd) {
 }
 
 func (p *ptyUnix) signal(group bool, signal syscall.Signal) error {
-	return p.signalUnix(group, signal)
+	return p.syscallKill(group, signal)
 }
 
-func closePidFD(pidFd int) {
+func (p *ptyUnix) closePidFD() {
 }
