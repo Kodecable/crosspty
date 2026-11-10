@@ -4,6 +4,7 @@ package crosspty
 
 import (
 	"errors"
+	"os"
 	"os/exec"
 	"sync"
 	"syscall"
@@ -12,10 +13,12 @@ import (
 
 type ptyUnix struct {
 	master ptyMaster
+	tty    *os.File // slave, held from New until Start
 	cmd    *exec.Cmd
 
 	pidFD int
 
+	started  bool
 	exitCode int
 	closeErr error
 
@@ -26,7 +29,7 @@ type ptyUnix struct {
 	closeCfg CloseConfig
 }
 
-func start(cc CommandConfig) (Pty, error) {
+func newPty(cc CommandConfig) (Pty, error) {
 	cc, err := NormalizeCommandConfig(cc)
 	if err != nil {
 		return nil, err
@@ -39,43 +42,61 @@ func start(cc CommandConfig) (Pty, error) {
 	cmd.Dir = cc.Dir
 	cmd.Env = cc.Env
 
-	return StartExecCmd(cmd, cc.Size, cc.CloseConfig)
+	return NewExecCmd(cmd, cc.Size, cc.CloseConfig)
 }
 
-// Unix only.
+// Unix only. See New() for the lifecycle.
 // You do not need to, and MUST NOT, set setpgid.
-// On Linux, this function will overwrite cmd.SysProcAttr.PidFD.
+// On Linux, Start() will overwrite cmd.SysProcAttr.PidFD.
+// Do not modify cmd after Start().
 // Use this function only if you know exactly what you are doing.
-func StartExecCmd(cmd *exec.Cmd, sz TermSize, closeConfig CloseConfig) (Pty, error) {
+func NewExecCmd(cmd *exec.Cmd, sz TermSize, closeConfig CloseConfig) (Pty, error) {
 	closeCfg, err := normalizeCloseConfig(closeConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	p := &ptyUnix{
-		cmd:      cmd,
-		exitch:   make(chan struct{}),
-		cleanch:  make(chan struct{}),
-		closeCfg: platformCloseConfig(closeCfg),
-	}
-
+	// Keep the slave open until Start(), so Read() blocks instead of
+	// returning EOF (EIO on Linux) before the subprocess holds it.
 	master, tty, err := openPty(sz)
 	if err != nil {
 		return nil, err
 	}
-	// The subprocess holds its own copy after Start().
-	defer tty.Close()
-	p.master = master
 
+	return &ptyUnix{
+		master:   master,
+		tty:      tty,
+		cmd:      cmd,
+		exitch:   make(chan struct{}),
+		cleanch:  make(chan struct{}),
+		closeCfg: platformCloseConfig(closeCfg),
+	}, nil
+}
+
+// Unix only. NewExecCmd() followed by Start().
+func StartExecCmd(cmd *exec.Cmd, sz TermSize, closeConfig CloseConfig) (Pty, error) {
+	p, err := NewExecCmd(cmd, sz, closeConfig)
+	if err != nil {
+		return nil, err
+	}
+	return startOrClose(p)
+}
+
+func (p *ptyUnix) Start() error {
+	if p.started {
+		return nil
+	}
+
+	cmd := p.cmd
 	// Same as creack/pty StartWithSize().
 	if cmd.Stdout == nil {
-		cmd.Stdout = tty
+		cmd.Stdout = p.tty
 	}
 	if cmd.Stderr == nil {
-		cmd.Stderr = tty
+		cmd.Stderr = p.tty
 	}
 	if cmd.Stdin == nil {
-		cmd.Stdin = tty
+		cmd.Stdin = p.tty
 	}
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
@@ -84,11 +105,15 @@ func StartExecCmd(cmd *exec.Cmd, sz TermSize, closeConfig CloseConfig) (Pty, err
 	cmd.SysProcAttr.Setsid = true
 	cmd.SysProcAttr.Setctty = true
 
-	err = cmd.Start()
+	err := cmd.Start()
+	// The subprocess holds its own copy now. On failure, this is the last
+	// slave, so readers get EOF.
+	p.tty.Close()
+	p.tty = nil
 	if err != nil {
-		master.Close()
-		return nil, err
+		return err
 	}
+	p.started = true
 
 	go func() {
 		// we collect exit code instead the error of Wait() here
@@ -102,7 +127,7 @@ func StartExecCmd(cmd *exec.Cmd, sz TermSize, closeConfig CloseConfig) (Pty, err
 		p.closePidFD()
 	}()
 
-	return p, nil
+	return nil
 }
 
 func (p *ptyUnix) syscallKill(group bool, signal syscall.Signal) error {
@@ -115,6 +140,11 @@ func (p *ptyUnix) syscallKill(group bool, signal syscall.Signal) error {
 
 func (p *ptyUnix) Close() error {
 	p.closer.Do(func() {
+		if !p.started {
+			// Start() failed; there is no subprocess to stop.
+			p.master.Close()
+			return
+		}
 		defer close(p.cleanch)
 
 		if p.closeCfg.TermSignal == 0 {

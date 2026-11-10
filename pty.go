@@ -20,12 +20,20 @@
 //     kernel revokes the controlling TTY during session teardown; the revoke
 //     path flushes unread output immediately, without waiting for the caller.
 //
-// According to their kernel sources, OpenBSD and NetBSD drain output to the
-// caller on both paths, so it is kept as long as the caller keeps reading.
+// # Requirement on OpenBSD and NetBSD: keep reading
 //
-// If you need reliable output from a very short-lived command on these
-// systems, a practical workaround is to wrap it in a shell and add a delay
-// before exit. For example: `[]string{"sh", "-c", "uname -a; sleep 1"}`.
+// OpenBSD and NetBSD drain output to the caller before tearing the TTY down:
+// they wait up to 5 seconds when the last slave closes, and indefinitely
+// before revoking the controlling TTY. Output is discarded if the caller never
+// reads it, for example when the PTY is closed first. Keep calling Read() to
+// avoid losing data.
+//
+// # Versioning
+//
+// CrossPTY follows Go module semantic versioning (semver): within a major
+// version, the contracts documented on exported identifiers are part of the
+// compatibility promise, not just the API surface. The platform
+// incompatibilities in this package doc are not covered.
 package crosspty
 
 import (
@@ -364,6 +372,14 @@ func normalizeCloseConfig(rawCloseCfg CloseConfig) (CloseConfig, error) {
 // assumes the process on the other side uses the system code page and
 // performs input/output conversion for you.
 type Pty interface {
+	// Start the subprocess. Calling Start() again after it succeeded has no
+	// effect and returns nil.
+	// After Start() fails, the only method you may call is Close(), which
+	// frees resources. Not thread-safe; see New() for the lifecycle.
+	Start() error
+
+	// Read and Write may be called before Start(); see New().
+	//
 	// After the process exits, Write may or may not return an error, but it
 	// will not panic.
 	// After the process exits, Write usually does not block, but it MAY still
@@ -426,10 +442,39 @@ type Pty interface {
 	Resize(sz TermSize) error
 }
 
-func Start(cc CommandConfig) (Pty, error) {
-	return start(cc)
+// New prepares the PTY without starting the subprocess.
+//
+// Until Start() succeeds, you may only call Read() and Write(). Reading before
+// Start() lets a Read wait for the first output of the subprocess. On FreeBSD
+// this raises the chance of reading trailing output of a short-lived
+// subprocess before the kernel discards it (see the package doc), but does
+// not guarantee it. Written data is buffered by the PTY until the subprocess
+// reads it, and may be echoed back to Read() on Unix.
+//
+// After Start() fails, you may only call Close(). Calling Close() without
+// calling Start() is not allowed.
+func New(cc CommandConfig) (Pty, error) {
+	return newPty(cc)
 
 	// Experimental TODO: runtime.AddCleanup?
+}
+
+// New() followed by Start().
+func Start(cc CommandConfig) (Pty, error) {
+	pty, err := New(cc)
+	if err != nil {
+		return nil, err
+	}
+	return startOrClose(pty)
+}
+
+func startOrClose(pty Pty) (Pty, error) {
+	err := pty.Start()
+	if err != nil {
+		pty.Close()
+		return nil, err
+	}
+	return pty, nil
 }
 
 // A simple helper that auto call Close() after context done. Read() and
@@ -447,21 +492,32 @@ func StartWithContext(ctx context.Context, cc CommandConfig) (Pty, error) {
 }
 
 // A simple helper that runs the command once and collects all output.
+// It starts reading before the subprocess starts; see New().
 func Oneshot(cc CommandConfig) (buf []byte, err error) {
-	ptmx, err := Start(cc)
-	if err != nil {
-		return nil, err
-	}
-	defer ptmx.Close()
-
-	buf, err = io.ReadAll(ptmx)
-	return
+	return OneshotWithContext(context.Background(), cc)
 }
 
 // See StartWithContext() and Oneshot().
 func OneshotWithContext(ctx context.Context, cc CommandConfig) (buf []byte, err error) {
-	ptmx, err := Start(cc)
+	ptmx, err := New(cc)
 	if err != nil {
+		return nil, err
+	}
+
+	type result struct {
+		buf []byte
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		buf, err := io.ReadAll(ptmx)
+		done <- result{buf, err}
+	}()
+
+	err = ptmx.Start()
+	if err != nil {
+		ptmx.Close()
+		<-done
 		return nil, err
 	}
 	defer ptmx.Close()
@@ -471,5 +527,6 @@ func OneshotWithContext(ctx context.Context, cc CommandConfig) (buf []byte, err 
 	})
 	defer stop()
 
-	return io.ReadAll(ptmx)
+	r := <-done
+	return r.buf, r.err
 }

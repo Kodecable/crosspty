@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -544,5 +545,31 @@ func TestCloseHangsUpWithPendingRead_Unix(t *testing.T) {
 	case <-readDone:
 	case <-time.After(5 * time.Second):
 		t.Fatal("pending Read was not released after Close()")
+	}
+}
+
+func TestWriteBeforeStart_Unix(t *testing.T) {
+	p, err := crosspty.New(crosspty.CommandConfig{
+		Argv: []string{"sh", "-c", "read x; echo \"got:$x\"; sleep 1"},
+	})
+	if err != nil {
+		t.Fatalf("unable to create pty: %v", err)
+	}
+
+	if _, err := p.Write([]byte("hello\n")); err != nil {
+		t.Fatalf("unable to write before Start(): %v", err)
+	}
+
+	if err := p.Start(); err != nil {
+		t.Fatalf("unable to start pty: %v", err)
+	}
+	defer p.Close()
+
+	buf, err := io.ReadAll(testutils.NewANSIStripper(p))
+	if err != nil {
+		t.Fatalf("unable to read pty: %v", err)
+	}
+	if !strings.Contains(string(buf), "got:hello") {
+		t.Fatalf("subprocess did not read the data written before Start(): %q", buf)
 	}
 }

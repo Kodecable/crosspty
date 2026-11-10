@@ -31,13 +31,27 @@ type ptyWin struct {
 	processHandle windows.Handle
 
 	jobHandle windows.Handle
+
+	// Held from New until Start.
+	cc      CommandConfig
+	sys     *syscall.SysProcAttr
+	started bool
 }
 
-func start(cc CommandConfig) (Pty, error) {
-	return StartWithSysProcAttr(cc, &syscall.SysProcAttr{})
+func newPty(cc CommandConfig) (Pty, error) {
+	return NewWithSysProcAttr(cc, &syscall.SysProcAttr{})
 }
 
-// Windows only.
+// Windows only. NewWithSysProcAttr() followed by Start().
+func StartWithSysProcAttr(cc CommandConfig, sys *syscall.SysProcAttr) (Pty, error) {
+	p, err := NewWithSysProcAttr(cc, sys)
+	if err != nil {
+		return nil, err
+	}
+	return startOrClose(p)
+}
+
+// Windows only. See New() for the lifecycle.
 // The following SysProcAttr fields are handled; others are ignored.
 //   - HideWindow
 //   - CmdLine
@@ -48,7 +62,8 @@ func start(cc CommandConfig) (Pty, error) {
 // If Token != 0, the default value of CommandConfig.Env is obtained from
 // CreateEnvironmentBlock using the given Token with bInherit = false.
 // CREATE_SUSPENDED in CreationFlags is ignored; suspension is controlled by KillMode.
-func StartWithSysProcAttr(cc CommandConfig, sys *syscall.SysProcAttr) (Pty, error) {
+// Do not modify sys after Start().
+func NewWithSysProcAttr(cc CommandConfig, sys *syscall.SysProcAttr) (Pty, error) {
 	if sys == nil {
 		sys = &syscall.SysProcAttr{}
 	}
@@ -70,6 +85,8 @@ func StartWithSysProcAttr(cc CommandConfig, sys *syscall.SysProcAttr) (Pty, erro
 		exitch:   make(chan struct{}),
 		cleanch:  make(chan struct{}),
 		closeCfg: cc.CloseConfig,
+		cc:       cc,
+		sys:      sys,
 	}
 
 	if p.closeCfg.KillMode != KillModeKillSubProcess {
@@ -85,16 +102,20 @@ func StartWithSysProcAttr(cc CommandConfig, sys *syscall.SysProcAttr) (Pty, erro
 		return nil, err
 	}
 
-	err = p.createProcess(cc, sys)
-	if err != nil {
-		windows.ClosePseudoConsole(p.conPty)
-		p.readPipe.Close()
-		p.writePipe.Close()
-		windows.CloseHandle(p.jobHandle)
-		return nil, err
+	return p, nil
+}
+
+func (p *ptyWin) Start() error {
+	if p.started {
+		return nil
 	}
 
-	return p, err
+	err := p.createProcess(p.cc, p.sys)
+	if err != nil {
+		return err
+	}
+	p.started = true
+	return nil
 }
 
 func (p *ptyWin) killProcess() error {
@@ -143,6 +164,16 @@ func (p *ptyWin) killProcess() error {
 
 func (p *ptyWin) Close() error {
 	p.closer.Do(func() {
+		if !p.started {
+			// Start() failed; there is no subprocess or processWaiter.
+			p.writePipe.Close()
+			// Close the read side before the ConPTY, so ClosePseudoConsole
+			// cannot block on writing its final frame.
+			p.readPipe.Close()
+			windows.ClosePseudoConsole(p.conPty)
+			windows.CloseHandle(p.jobHandle)
+			return
+		}
 		p.closeErr = p.killProcess()
 		p.readPipe.Close()
 		// clean handle in processWaiter since it may still using it when

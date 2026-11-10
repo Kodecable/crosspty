@@ -782,3 +782,121 @@ func TestOneshotContext_Cancel(t *testing.T) {
 		t.Fatal("OneshotContext did not return after context deadline")
 	}
 }
+
+// nonexistentAbsBinary returns an absolute path that passes
+// NormalizeCommandConfig (no LookPath) but makes Start() fail.
+func nonexistentAbsBinary() string {
+	if runtime.GOOS == "windows" {
+		return `C:\crosspty-nonexistent\crosspty-binary.exe`
+	}
+	return "/crosspty-nonexistent/crosspty-binary"
+}
+
+func TestReadBeforeStart(t *testing.T) {
+	argv := []string{"echo", "hello-before-start"}
+	if runtime.GOOS == "windows" {
+		argv = []string{"cmd", "/c", "echo hello-before-start"}
+	}
+	if needsTrailingOutputDelay() {
+		argv = wrapArgvWithTrailingDelay(argv)
+	}
+
+	p, err := crosspty.New(crosspty.CommandConfig{Argv: argv})
+	if err != nil {
+		t.Fatalf("unable to create pty: %v", err)
+	}
+
+	type result struct {
+		buf []byte
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		buf, err := io.ReadAll(testutils.NewANSIStripper(p))
+		done <- result{buf, err}
+	}()
+
+	select {
+	case r := <-done:
+		t.Fatalf("Read returned before Start(): %q, %v", r.buf, r.err)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	if err := p.Start(); err != nil {
+		t.Fatalf("unable to start pty: %v", err)
+	}
+	defer p.Close()
+
+	// Start() on a started Pty has no effect.
+	if err := p.Start(); err != nil {
+		t.Fatalf("second Start() returned %v", err)
+	}
+
+	select {
+	case r := <-done:
+		if r.err != nil {
+			t.Fatalf("unable to read pty: %v", r.err)
+		}
+		if !strings.Contains(string(r.buf), "hello-before-start") {
+			t.Fatalf("unexpected output: %q", r.buf)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Read did not finish after the subprocess exited")
+	}
+
+	if code := p.Wait(); code != 0 {
+		t.Fatalf("unexpected exit code %d", code)
+	}
+}
+
+func TestStartFailureThenClose(t *testing.T) {
+	t.Parallel()
+
+	p, err := crosspty.New(crosspty.CommandConfig{
+		Argv: []string{nonexistentAbsBinary()},
+	})
+	if err != nil {
+		t.Fatalf("unable to create pty: %v", err)
+	}
+
+	readDone := make(chan struct{})
+	go func() {
+		defer close(readDone)
+		io.Copy(io.Discard, p)
+	}()
+
+	if err := p.Start(); err == nil {
+		p.Close()
+		t.Fatal("expected Start() to fail for a nonexistent binary")
+	}
+	if err := p.Close(); err != nil {
+		t.Fatalf("Close() after failed Start() returned %v", err)
+	}
+
+	select {
+	case <-readDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("pending Read was not released after Close()")
+	}
+}
+
+func TestOneshot_StartFailureAfterNew(t *testing.T) {
+	t.Parallel()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := crosspty.Oneshot(crosspty.CommandConfig{
+			Argv: []string{nonexistentAbsBinary()},
+		})
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected error for nonexistent binary")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Oneshot did not return after Start() failed")
+	}
+}

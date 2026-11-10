@@ -1,5 +1,8 @@
 # CrossPTY
 
+[![test](https://github.com/Kodecable/crosspty/actions/workflows/test.yml/badge.svg)](https://github.com/Kodecable/crosspty/actions/workflows/test.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/Kodecable/crosspty.svg)](https://pkg.go.dev/github.com/Kodecable/crosspty)
+
 Cross-platform pseudo-terminal (PTY) library written in pure Go with **built-in process lifecycle management** and **explicit cross-platform behavior contract**.
 
 ## Installation
@@ -22,7 +25,7 @@ go io.Copy(p, os.Stdin)
 io.Copy(os.Stdout, p) // reads until p returns io.EOF on process exit
 ```
 
-> Check `pty.go` or [godoc](http://godoc.org/github.com/Kodecable/crosspty) for details.
+> Check [godoc](http://godoc.org/github.com/Kodecable/crosspty) for details.
 
 ## Features
 
@@ -88,6 +91,20 @@ output, err := crosspty.Oneshot(crosspty.CommandConfig{
 })
 ```
 
+**Read before start**
+
+`New()` prepares the PTY without starting the subprocess, so a `Read()` can already be waiting for its first output (`Oneshot` does this):
+
+```go
+p, _ := crosspty.New(crosspty.CommandConfig{Argv: []string{"uname", "-a"}})
+go io.Copy(os.Stdout, p)
+if err := p.Start(); err != nil {
+    p.Close()
+}
+```
+
+Until `Start()` succeeds, only `Read()` and `Write()` may be called; after `Start()` fails, only `Close()`.
+
 **Platform-specific advanced APIs**
 
 ```go
@@ -104,9 +121,9 @@ p, _ := crosspty.StartWithSysProcAttr(cc, &syscall.SysProcAttr{
 
 **Unix-like Systems**
 
-CrossPTY uses [creack/pty](https://github.com/creack/pty) for its Unix implementation. On Linux, it requires UNIX 98 pseudo-terminal support (`CONFIG_UNIX98_PTYS=y`) and the `/dev/ptmx` device.
+CrossPTY uses [creack/pty](https://github.com/creack/pty) for its Unix implementation. Behavior is not identical to creack/pty; see the [godoc](http://godoc.org/github.com/Kodecable/crosspty) for CrossPTY's behavior. On Linux, it requires UNIX 98 pseudo-terminal support (`CONFIG_UNIX98_PTYS=y`) and the `/dev/ptmx` device.
 
-CI tested on: Linux 4.4, 5.4, 5.15, 6.6, 6.18; FreeBSD 15.1; OpenBSD 7.9; NetBSD 10.1.
+CI tested on: Linux 4.4, 5.4, 5.15, 6.6, 6.18; FreeBSD 15.1; OpenBSD 7.9; NetBSD 10.1; macOS 26.
 
 **Windows**
 
