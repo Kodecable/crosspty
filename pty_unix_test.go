@@ -32,8 +32,8 @@ func TestHelperProcessUnix(t *testing.T) {
 			os.Exit(1)
 		}
 		writeHelperProtocolLine("PID", fmt.Sprintf("%d", cmd.Process.Pid))
-		if isBSD() {
-			time.Sleep(time.Second)
+		if needsTrailingOutputDelay() {
+			time.Sleep(trailingOutputDelay)
 		}
 		os.Exit(0)
 	}
@@ -44,8 +44,8 @@ func TestHelperProcessUnix(t *testing.T) {
 			os.Exit(1)
 		}
 		writeHelperProtocolLine("PID", fmt.Sprintf("%d", cmd.Process.Pid))
-		if isBSD() {
-			time.Sleep(time.Second)
+		if needsTrailingOutputDelay() {
+			time.Sleep(trailingOutputDelay)
 		}
 		os.Exit(0)
 	}
@@ -487,5 +487,62 @@ func TestCloseIdempotentError_Unix(t *testing.T) {
 	// instead of dropping it.
 	if err2 := p.Close(); err2 != err1 {
 		t.Fatalf("Close() is not idempotent: got %v then %v", err1, err2)
+	}
+}
+
+// Closing the PTY must hang up the subprocess even while another goroutine
+// is blocked in Read(). A blocking master FD stays open until the pending
+// Read returns, so the SIGHUP would never arrive and Close() would fall back
+// to the KillSignal after KillDelay.
+func TestCloseHangsUpWithPendingRead_Unix(t *testing.T) {
+	const killDelay = 10 * time.Second
+
+	if runtime.GOOS == "darwin" {
+		// see master_darwin.go
+		t.Skip("Skip Close hangs up pending Read in darwin")
+	}
+
+	p, err := crosspty.Start(crosspty.CommandConfig{
+		Argv: []string{"sleep", "100"},
+		CloseConfig: crosspty.CloseConfig{
+			CloseTimeout: killDelay + 5*time.Second,
+			KillDelay:    killDelay,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unable to start pty: %v", err)
+	}
+	defer syscall.Kill(p.Pid(), syscall.SIGKILL)
+
+	readDone := make(chan struct{})
+	go func() {
+		defer close(readDone)
+		buf := make([]byte, 1024)
+		for {
+			if _, err := p.Read(buf); err != nil {
+				return
+			}
+		}
+	}()
+
+	// Resize must not switch the master back to blocking mode.
+	if err := p.Resize(crosspty.TermSize{Rows: 30, Cols: 100}); err != nil {
+		t.Fatalf("unable to resize pty: %v", err)
+	}
+	// Give the reader time to block.
+	time.Sleep(200 * time.Millisecond)
+
+	start := time.Now()
+	if err := p.Close(); err != nil {
+		t.Fatalf("unable to close pty: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed >= killDelay/2 {
+		t.Fatalf("Close() took %v; the subprocess was not hung up while a Read was pending", elapsed)
+	}
+
+	select {
+	case <-readDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("pending Read was not released after Close()")
 	}
 }

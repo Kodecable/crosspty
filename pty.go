@@ -1,7 +1,7 @@
 // Package crosspty provides a cross-platform PTY abstraction with explicit
 // process-lifecycle management.
 //
-// # Known incompatibility on FreeBSD, OpenBSD, NetBSD and Darwin
+// # Known incompatibility on FreeBSD (and possibly Darwin)
 //
 // After the direct PTY subprocess exits, trailing PTY output may be
 // *interestingly* discarded by the kernel before callers can read it. This
@@ -9,15 +9,19 @@
 // commands. Interactive or longer-lived subprocesses are much less affected
 // because callers typically read while the subprocess is still running.
 //
-// For example, FreeBSD can discard unread output through two known kernel
-// teardown paths after the direct subprocess exits:
+// FreeBSD can discard unread output through two known kernel teardown paths
+// after the direct subprocess exits:
 //
-//  1. The last slave close path will flush unread PTY output when the final
-//     slave descriptor is closed.
-//  2. If the exiting subprocess is a session leader that owns the controlling
-//     TTY, the kernel will revoke that controlling TTY during session
-//     teardown; the revoke path will close the TTY and flush unread output
-//     before the caller reads it.
+//  1. The last slave close path drains output to the caller first, but
+//     flushes it if the caller makes no reading progress for about a second.
+//  2. The direct subprocess is the session leader that owns the controlling
+//     TTY. If the slave is still open elsewhere when it exits (for example
+//     CrossPTY's own copy while Start() returns, or another process), the
+//     kernel revokes the controlling TTY during session teardown; the revoke
+//     path flushes unread output immediately, without waiting for the caller.
+//
+// According to their kernel sources, OpenBSD and NetBSD drain output to the
+// caller on both paths, so it is kept as long as the caller keeps reading.
 //
 // If you need reliable output from a very short-lived command on these
 // systems, a practical workaround is to wrap it in a shell and add a delay
@@ -113,6 +117,8 @@ type CloseConfig struct {
 	// signal is sent to the subprocess group instead of just the subprocess.
 	// This is useful when your subprocess treats SIGHUP as a reload signal, or
 	// when you want to keep I/O available until the end of Close().
+	// On Darwin, 0 is treated as SIGHUP with TermSignalGroup false, since
+	// closing the FD cannot hang up the subprocess while a Read is pending.
 	TermSignal      syscall.Signal
 	TermSignalGroup bool
 

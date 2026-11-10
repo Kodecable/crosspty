@@ -4,18 +4,15 @@ package crosspty
 
 import (
 	"errors"
-	"os"
 	"os/exec"
 	"sync"
 	"syscall"
 	"time"
-
-	creackpty "github.com/creack/pty"
 )
 
 type ptyUnix struct {
-	file *os.File
-	cmd  *exec.Cmd
+	master ptyMaster
+	cmd    *exec.Cmd
 
 	pidFD int
 
@@ -59,15 +56,39 @@ func StartExecCmd(cmd *exec.Cmd, sz TermSize, closeConfig CloseConfig) (Pty, err
 		cmd:      cmd,
 		exitch:   make(chan struct{}),
 		cleanch:  make(chan struct{}),
-		closeCfg: closeCfg,
+		closeCfg: platformCloseConfig(closeCfg),
 	}
-	p.setSysProcAttr(cmd)
 
-	of, err := creackpty.StartWithSize(cmd, creackptyWinsize(sz))
+	master, tty, err := openPty(sz)
 	if err != nil {
 		return nil, err
 	}
-	p.file = of
+	// The subprocess holds its own copy after Start().
+	defer tty.Close()
+	p.master = master
+
+	// Same as creack/pty StartWithSize().
+	if cmd.Stdout == nil {
+		cmd.Stdout = tty
+	}
+	if cmd.Stderr == nil {
+		cmd.Stderr = tty
+	}
+	if cmd.Stdin == nil {
+		cmd.Stdin = tty
+	}
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	p.setSysProcAttr(cmd)
+	cmd.SysProcAttr.Setsid = true
+	cmd.SysProcAttr.Setctty = true
+
+	err = cmd.Start()
+	if err != nil {
+		master.Close()
+		return nil, err
+	}
 
 	go func() {
 		// we collect exit code instead the error of Wait() here
@@ -97,9 +118,9 @@ func (p *ptyUnix) Close() error {
 		defer close(p.cleanch)
 
 		if p.closeCfg.TermSignal == 0 {
-			p.file.Close() // trigger SIGHUP
+			p.master.Close() // trigger SIGHUP
 		} else {
-			defer p.file.Close()
+			defer p.master.Close()
 			p.signal(p.closeCfg.TermSignalGroup, p.closeCfg.TermSignal)
 		}
 
@@ -146,7 +167,7 @@ func (p *ptyUnix) Close() error {
 }
 
 func (p *ptyUnix) Write(d []byte) (n int, err error) {
-	return p.file.Write(d)
+	return p.master.Write(d)
 }
 
 func (p *ptyUnix) Wait() int {
@@ -159,14 +180,5 @@ func (p *ptyUnix) Pid() int {
 }
 
 func (p *ptyUnix) Resize(sz TermSize) error {
-	return creackpty.Setsize(p.file, creackptyWinsize(sz))
-}
-
-func creackptyWinsize(sz TermSize) *creackpty.Winsize {
-	return &creackpty.Winsize{
-		Rows: sz.Rows,
-		Cols: sz.Cols,
-		X:    sz.X,
-		Y:    sz.Y,
-	}
+	return p.master.setsize(unixWinsize(sz))
 }

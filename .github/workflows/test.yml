@@ -147,6 +147,28 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
 
+  go-test-darwin:
+    name: macos 26
+    runs-on: macos-26
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests
+        run: go test -coverprofile coverage.txt -count=1 -v -timeout=10m ./...
+
+      - name: Upload results to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+
   go-test-bsd:
     name: ${{ matrix.os.name }} ${{ matrix.os.version }}
     runs-on: ubuntu-24.04

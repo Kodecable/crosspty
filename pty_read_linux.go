@@ -9,7 +9,7 @@ import (
 )
 
 func (p *ptyUnix) Read(d []byte) (n int, err error) {
-	n, err = p.file.Read(d)
+	n, err = p.master.Read(d)
 
 	// Linux kernel is returning EIO when reading a dead pty slave
 	// https://github.com/creack/pty/issues/21#issuecomment-129381749
